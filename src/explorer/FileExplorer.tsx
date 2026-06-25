@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import type { FileEntry } from "../types";
 
 interface FileExplorerProps {
@@ -6,7 +6,7 @@ interface FileExplorerProps {
   onOpenFile: (path: string) => void;
 }
 
-export function FileExplorer({
+export const FileExplorer = memo(function FileExplorer({
   rootPath,
   onOpenFile,
 }: FileExplorerProps) {
@@ -19,7 +19,7 @@ export function FileExplorer({
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
   const [createParent, setCreateParent] = useState("");
   const [createValue, setCreateValue] = useState("");
-  const ctxRef = useState<string | null>(null);
+  const ctxRef = useState<{ path: string; x: number; y: number } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!rootPath) return;
@@ -71,7 +71,7 @@ export function FileExplorer({
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, path: string) => {
       e.preventDefault();
-      ctxRef[1](path);
+      ctxRef[1]({ path, x: e.clientX, y: e.clientY });
       // Close on click outside
       const close = () => {
         ctxRef[1](null);
@@ -265,11 +265,11 @@ export function FileExplorer({
       {!loading && renderTree(entries, 0)}
 
       {ctxRef[0] && (
-        <div className="explorer-context-menu" style={{ position: "fixed", left: 100, top: 100 }}>
-          <button onClick={() => { startRename(ctxRef[0]!); ctxRef[1](null); }}>Renomear</button>
-          <button onClick={() => { handleDelete(ctxRef[0]!); ctxRef[1](null); }}>Excluir</button>
+        <div className="explorer-context-menu" style={{ position: "fixed", left: ctxRef[0].x, top: ctxRef[0].y }}>
+          <button onClick={() => { startRename(ctxRef[0]!.path); ctxRef[1](null); }}>Renomear</button>
+          <button onClick={() => { handleDelete(ctxRef[0]!.path); ctxRef[1](null); }}>Excluir</button>
         </div>
       )}
     </div>
   );
-}
+});

@@ -11,6 +11,9 @@ export function SearchPanel({ rootPath, onOpenFile }: SearchPanelProps) {
   const [results, setResults] = useState<SearchMatch[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [useRegex, setUseRegex] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const doSearch = useCallback(
@@ -22,14 +25,14 @@ export function SearchPanel({ rootPath, onOpenFile }: SearchPanelProps) {
       }
       setLoading(true);
       setSearched(true);
-      searchFiles(rootPath, q)
+      searchFiles(rootPath, q, { caseSensitive, useRegex, wholeWord })
         .then((matches) => {
           setResults(matches);
         })
         .catch(() => setResults([]))
         .finally(() => setLoading(false));
     },
-    [rootPath]
+    [rootPath, caseSensitive, useRegex, wholeWord]
   );
 
   const handleChange = (val: string) => {
@@ -66,6 +69,20 @@ export function SearchPanel({ rootPath, onOpenFile }: SearchPanelProps) {
             if (e.key === "Enter") doSearch(query);
           }}
         />
+      </div>
+      <div className="search-options">
+        <label className={`search-opt ${caseSensitive ? "active" : ""}`}>
+          <input type="checkbox" checked={caseSensitive} onChange={(e) => { setCaseSensitive(e.target.checked); doSearch(query); }} />
+          Aa
+        </label>
+        <label className={`search-opt ${useRegex ? "active" : ""}`}>
+          <input type="checkbox" checked={useRegex} onChange={(e) => { setUseRegex(e.target.checked); doSearch(query); }} />
+          .*
+        </label>
+        <label className={`search-opt ${wholeWord ? "active" : ""}`}>
+          <input type="checkbox" checked={wholeWord} onChange={(e) => { setWholeWord(e.target.checked); doSearch(query); }} />
+          W
+        </label>
       </div>
       <div className="search-results">
         {loading && <div className="search-empty">Buscando...</div>}

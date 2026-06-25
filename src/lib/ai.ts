@@ -34,7 +34,7 @@ export interface StreamDelta {
   tool_calls?: ToolCall[];
 }
 
-export const DEFAULT_MODELS_DIR = "D:\\LocalAIModels\\.lmstudio\\hub\\models";
+export const DEFAULT_MODELS_DIR = "";
 
 export const listModels = (dir: string) => invoke<ModelInfo[]>("list_models", { dir });
 export const startLlm = (modelPath: string, nGpuLayers: number, ctxSize: number) =>

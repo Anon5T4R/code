@@ -529,7 +529,7 @@ dependencies = [
 
 [[package]]
 name = "code"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -538,6 +538,7 @@ dependencies = [
  "lsp-types",
  "octocrab",
  "portable-pty",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

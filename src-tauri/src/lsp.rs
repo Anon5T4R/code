@@ -395,8 +395,11 @@ impl LspManager {
 
         // Read pending diagnostics from server
         let mut diagnostics = Vec::new();
-        loop {
-            match timeout(Duration::from_millis(100), inst.read_message()).await {
+        // Small delay to let the server process the change
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Read all available messages with a short timeout each
+        for _ in 0..20 {
+            match timeout(Duration::from_millis(50), inst.read_message()).await {
                 Ok(Ok(msg)) => {
                     let is_diag = msg.method.as_deref() == Some("textDocument/publishDiagnostics");
                     if msg.id.is_none() && is_diag {
@@ -410,7 +413,6 @@ impl LspManager {
                             }
                         }
                     }
-                    // If it's a stray response, ignore
                 }
                 _ => break,
             }

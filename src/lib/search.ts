@@ -9,7 +9,17 @@ export interface SearchMatch {
   match_end: number;
 }
 
-export async function searchFiles(root: string, query: string): Promise<SearchMatch[]> {
+export async function searchFiles(
+  root: string,
+  query: string,
+  opts?: { caseSensitive?: boolean; useRegex?: boolean; wholeWord?: boolean }
+): Promise<SearchMatch[]> {
   if (!query.trim()) return [];
-  return invoke<SearchMatch[]>("search_files", { root, query });
+  return invoke<SearchMatch[]>("search_files", {
+    root,
+    query,
+    caseSensitive: opts?.caseSensitive ?? false,
+    useRegex: opts?.useRegex ?? false,
+    wholeWord: opts?.wholeWord ?? false,
+  });
 }

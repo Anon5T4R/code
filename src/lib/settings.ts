@@ -6,6 +6,7 @@ export interface Settings {
   ngl: number;
   ctx: number;
   showAiPanel: boolean;
+  locale: "pt" | "en";
 }
 
 const DEFAULTS: Settings = {
@@ -14,6 +15,7 @@ const DEFAULTS: Settings = {
   ngl: 0,
   ctx: 4096,
   showAiPanel: false,
+  locale: "pt",
 };
 
 const KEY = "localcode.settings";

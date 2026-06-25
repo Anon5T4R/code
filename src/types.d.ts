@@ -43,4 +43,5 @@ export interface Tab {
   language: string;
   dirty: boolean;
   content: string;
+  savedContent: string;
 }

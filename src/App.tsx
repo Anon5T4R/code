@@ -13,6 +13,7 @@ import { OutlinePanel } from "./outline/OutlinePanel";
 import { SearchPanel } from "./search/SearchPanel";
 import { AiPanel } from "./ai/AiPanel";
 import { LspSetupPanel } from "./lsp-setup/LspSetupPanel";
+import { SettingsPanel } from "./settings/SettingsPanel";
 import { readFile, writeFile, extToLanguage } from "./lib/fs";
 import { getBranches } from "./lib/git";
 import type { Tab } from "./types";
@@ -32,6 +33,7 @@ function newTab(filePath?: string, content?: string): Tab {
     language: ext ? extToLanguage(ext) : "plaintext",
     dirty: false,
     content: content || "",
+    savedContent: content || "",
   };
 }
 
@@ -45,10 +47,12 @@ function App() {
   const [showGitHub, setShowGitHub] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [showLspSetup, setShowLspSetup] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [gitBranch, setGitBranch] = useState<string>("");
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
   const [gotoLine, setGotoLine] = useState<number | null>(null);
+  const [tabCtx, setTabCtx] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
@@ -110,10 +114,21 @@ function App() {
     if (!tab || !tab.path) return;
     try {
       await writeFile(tab.path, tab.content);
-      setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, dirty: false } : t)));
+      setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, dirty: false, savedContent: t.content } : t)));
     } catch (e) {
       console.error("Failed to save:", e);
     }
+  }, []);
+
+  const closeOtherTabs = useCallback((id: string) => {
+    const tab = tabsRef.current.find((t) => t.id === id);
+    setTabs(tab ? [tab] : []);
+    setActiveId(id);
+  }, []);
+
+  const closeAllTabs = useCallback(() => {
+    setTabs([newTab()]);
+    setActiveId("");
   }, []);
 
   const closeTab = useCallback((id: string) => {
@@ -195,9 +210,30 @@ function App() {
       } else if (k === "w") {
         e.preventDefault();
         closeTab(activeIdRef.current);
+      } else if (e.shiftKey && k === "i") {
+        e.preventDefault();
+        setShowAi((v) => !v);
+        setShowLspSetup(false);
+        setShowGit(false);
+        setShowGitHub(false);
+      } else if (e.shiftKey && k === "l") {
+        e.preventDefault();
+        setShowLspSetup((v) => !v);
+        setShowAi(false);
+        setShowGit(false);
+        setShowGitHub(false);
       } else if (e.shiftKey && k === "g") {
         e.preventDefault();
         setShowGit((v) => !v);
+        setShowAi(false);
+        setShowLspSetup(false);
+        setShowGitHub(false);
+      } else if (e.shiftKey && k === "h") {
+        e.preventDefault();
+        setShowGitHub((v) => !v);
+        setShowAi(false);
+        setShowLspSetup(false);
+        setShowGit(false);
       } else if (e.shiftKey && k === "f") {
         e.preventDefault();
         setShowSearch((v) => !v);
@@ -221,6 +257,10 @@ function App() {
               key={tab.id}
               className={`title-tab ${tab.id === activeId ? "active" : ""}`}
               onClick={() => setActiveId(tab.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setTabCtx({ id: tab.id, x: e.clientX, y: e.clientY });
+              }}
               onMouseDown={(e) => {
                 if (e.button === 1) closeTab(tab.id);
               }}
@@ -242,22 +282,43 @@ function App() {
             setTabs((ts) => [...ts, t]);
             setActiveId(t.id);
           }}>+</button>
+          {tabCtx && tabs.length > 1 && (
+            <div
+              className="tab-context-menu"
+              style={{ position: "fixed", left: tabCtx.x, top: tabCtx.y }}
+              onClick={() => setTabCtx(null)}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <button onClick={() => { closeOtherTabs(tabCtx.id); setTabCtx(null); }}>
+                Fechar outros
+              </button>
+              <button onClick={() => { closeAllTabs(); setTabCtx(null); }}>
+                Fechar todos
+              </button>
+            </div>
+          )}
         </div>
         <div className="title-bar-actions">
-          <button className="action-btn" onClick={() => setShowAi((v) => !v)} title="AI Assistant (Ctrl+Shift+I)">
+          <button className="action-btn" onClick={saveFile} disabled={!activeTab?.dirty} title="Salvar (Ctrl+S)">
+            💾
+          </button>
+          <button className="action-btn" onClick={() => setShowAi((v) => !v)} title="AI (Ctrl+Shift+I)">
             AI
           </button>
-          <button className="action-btn" onClick={() => setShowLspSetup((v) => !v)} title="LSP Setup">
+          <button className="action-btn" onClick={() => setShowLspSetup((v) => !v)} title="LSP (Ctrl+Shift+L)">
             LSP
           </button>
-          <button className="action-btn" onClick={() => setShowGitHub((v) => !v)} title="GitHub">
+          <button className="action-btn" onClick={() => setShowGitHub((v) => !v)} title="GitHub (Ctrl+Shift+H)">
             GitHub
           </button>
-          <button className="action-btn" onClick={() => setShowGit((v) => !v)} title="Git">
+          <button className="action-btn" onClick={() => setShowGit((v) => !v)} title="Git (Ctrl+Shift+G)">
             Git
           </button>
           <button className="action-btn" onClick={() => { setShowSearch((v) => !v); setShowTerminal(false); }} title="Pesquisar (Ctrl+Shift+F)">
             🔍
+          </button>
+          <button className="action-btn" onClick={() => setShowSettings((v) => !v)} title="Configurações">
+            ⚙️
           </button>
           <button className="action-btn" onClick={openFolder} title="Abrir pasta (Ctrl+K Ctrl+O)">
             📂
@@ -305,7 +366,7 @@ function App() {
                   setTabs((ts) =>
                     ts.map((t) =>
                       t.id === activeIdRef.current
-                        ? { ...t, content: val, dirty: t.path !== null }
+                        ? { ...t, content: val, dirty: val !== t.savedContent }
                         : t
                     )
                   );
@@ -321,12 +382,13 @@ function App() {
         </div>
 
         {/* Right panels */}
-        {(showGit || showGitHub || showAi || showLspSetup) && (
+        {(showGit || showGitHub || showAi || showLspSetup || showSettings) && (
           <div className="side-panel">
             {showGit && <GitPanel repoPath={repoPath} />}
             {showGitHub && <GitHubPanel repoPath={repoPath} />}
             {showAi && <AiPanel />}
             {showLspSetup && <LspSetupPanel />}
+            {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
           </div>
         )}
       </div>

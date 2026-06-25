@@ -1,5 +1,5 @@
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::fs;
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -60,11 +60,6 @@ struct RepoEntry {
 struct GithubPrResult {
     url: String,
     number: u64,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct GithubState {
-    token: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -156,10 +151,25 @@ struct SearchMatch {
 }
 
 #[tauri::command]
-fn search_files(root: String, query: String) -> Result<Vec<SearchMatch>, String> {
+fn search_files(
+    root: String,
+    query: String,
+    case_sensitive: Option<bool>,
+    use_regex: Option<bool>,
+    whole_word: Option<bool>,
+) -> Result<Vec<SearchMatch>, String> {
+    let case_sensitive = case_sensitive.unwrap_or(false);
+    let use_regex = use_regex.unwrap_or(false);
+    let whole_word = whole_word.unwrap_or(false);
+
     let mut results = Vec::new();
-    let query_lower = query.to_lowercase();
     let mut dirs = vec![PathBuf::from(&root)];
+
+    let re = if use_regex {
+        Some(regex::Regex::new(&query).map_err(|e| format!("Regex inválida: {}", e))?)
+    } else {
+        None
+    };
 
     while let Some(dir) = dirs.pop() {
         let entries = match fs::read_dir(&dir) {
@@ -185,17 +195,60 @@ fn search_files(root: String, query: String) -> Result<Vec<SearchMatch>, String>
                     Ok(c) => c,
                     Err(_) => continue,
                 };
-                for (i, line) in content.lines().enumerate() {
-                    if let Some(col) = line.to_lowercase().find(&query_lower) {
-                        results.push(SearchMatch {
-                            path: path.to_string_lossy().to_string(),
-                            line: (i + 1) as u32,
-                            column: (col + 1) as u32,
-                            line_content: line.to_string(),
-                            match_start: col as u32,
-                            match_end: (col + query.len()) as u32,
-                        });
+
+                    let mut search_line = |line: &str, line_idx: usize| {
+                    let (search_in, search_for) = if case_sensitive {
+                        (line.to_string(), query.clone())
+                    } else {
+                        (line.to_lowercase(), query.to_lowercase())
+                    };
+
+                    if let Some(re) = &re {
+                        for m in re.find_iter(&search_in) {
+                            let col = m.start();
+                            let end = m.end();
+                            if whole_word {
+                                let before = col > 0 && search_in.as_bytes().get(col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                                let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                                if before || after { continue; }
+                            }
+                            results.push(SearchMatch {
+                                path: path.to_string_lossy().to_string(),
+                                line: (line_idx + 1) as u32,
+                                column: (col + 1) as u32,
+                                line_content: line.to_string(),
+                                match_start: col as u32,
+                                match_end: end as u32,
+                            });
+                        }
+                    } else {
+                        let mut start = 0;
+                        while let Some(col) = search_in[start..].find(&search_for) {
+                            let abs_col = start + col;
+                            let end = abs_col + query.len();
+                            if whole_word {
+                                let before = abs_col > 0 && search_in.as_bytes().get(abs_col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                                let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                                if before || after {
+                                    start = abs_col + 1;
+                                    continue;
+                                }
+                            }
+                            results.push(SearchMatch {
+                                path: path.to_string_lossy().to_string(),
+                                line: (line_idx + 1) as u32,
+                                column: (abs_col + 1) as u32,
+                                line_content: line.to_string(),
+                                match_start: abs_col as u32,
+                                match_end: end as u32,
+                            });
+                            start = abs_col + 1;
+                        }
                     }
+                };
+
+                for (i, line) in content.lines().enumerate() {
+                    search_line(line, i);
                 }
             }
         }
@@ -389,19 +442,24 @@ fn git_branch_create(repo_path: String, name: String) -> Result<(), String> {
 
 fn github_token_path(app: &tauri::AppHandle) -> PathBuf {
     let mut path = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
-    path.push(".github_token.json");
+    path.push(".github_token.bin");
     path
+}
+
+const TOKEN_XOR_KEY: &[u8] = b"LocalCode2024!Secret@Key";
+
+fn xor_cipher(data: &[u8]) -> Vec<u8> {
+    data.iter().enumerate().map(|(i, b)| b ^ TOKEN_XOR_KEY[i % TOKEN_XOR_KEY.len()]).collect()
 }
 
 #[tauri::command]
 fn github_set_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
-    let state = GithubState { token: Some(token) };
     let path = github_token_path(&app);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let json = serde_json::to_string(&state).map_err(|e| format!("Erro serializando: {}", e))?;
-    fs::write(&path, json).map_err(|e| format!("Erro salvando token: {}", e))?;
+    let encrypted = xor_cipher(token.as_bytes());
+    fs::write(&path, encrypted).map_err(|e| format!("Erro salvando token: {}", e))?;
     Ok(())
 }
 
@@ -411,9 +469,10 @@ fn github_get_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let json = fs::read_to_string(&path).map_err(|e| format!("Erro lendo token: {}", e))?;
-    let state: GithubState = serde_json::from_str(&json).map_err(|e| format!("Erro parse: {}", e))?;
-    Ok(state.token)
+    let encrypted = fs::read(&path).map_err(|e| format!("Erro lendo token: {}", e))?;
+    let decrypted = xor_cipher(&encrypted);
+    let token = String::from_utf8(decrypted).map_err(|_| "Token corrompido".to_string())?;
+    Ok(Some(token))
 }
 
 #[tauri::command]
