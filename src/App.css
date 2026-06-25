@@ -1126,6 +1126,46 @@ html, body, #root {
   background: var(--accent-hover);
 }
 
+.ai-llama-missing {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.ai-llama-missing p {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.ai-llama-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-download-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  margin-top: 6px;
+}
+
+.ai-download-btn:hover {
+  background: var(--accent-hover);
+}
+
+.ai-download-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .ai-status-row {
   display: flex;
   align-items: center;

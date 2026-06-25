@@ -853,6 +853,8 @@ const LLAMA_SERVER_BIN: &str = if cfg!(windows) { "llama-server.exe" } else { "l
 fn resolve_llama_server(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let rel = format!("binaries/llama/{}", LLAMA_SERVER_BIN);
     let mut candidates: Vec<PathBuf> = Vec::new();
+    // App data directory (where we download)
+    candidates.push(llama_server_path(app));
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join(&rel));
     }
@@ -979,6 +981,83 @@ fn llm_status(state: tauri::State<'_, Mutex<LlmState>>) -> LlmStatus {
         port: s.port,
         model: s.model.clone(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// llama-server download
+// ---------------------------------------------------------------------------
+
+fn llama_server_path(app: &tauri::AppHandle) -> PathBuf {
+    let mut p = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
+    p.push("binaries");
+    p.push("llama");
+    let _ = fs::create_dir_all(&p);
+    p.push(LLAMA_SERVER_BIN);
+    p
+}
+
+#[tauri::command]
+fn check_llama_server(app: tauri::AppHandle) -> Result<String, String> {
+    let p = llama_server_path(&app);
+    if p.exists() {
+        Ok(p.to_string_lossy().to_string())
+    } else {
+        Err("llama-server não encontrado".into())
+    }
+}
+
+#[tauri::command]
+fn download_llama_server(app: tauri::AppHandle) -> Result<String, String> {
+    let dest = llama_server_path(&app);
+    if dest.exists() {
+        return Ok(dest.to_string_lossy().to_string());
+    }
+
+    let url = "https://github.com/ggml-org/llama.cpp/releases/download/b4593/llama-b4593-bin-win-cuda-cu11.7.1-x64.zip";
+
+    let zip_path = dest.with_extension("zip");
+    let response = ureq::get(url)
+        .call()
+        .map_err(|e| format!("Falha ao baixar: {}", e))?;
+
+    let mut out = fs::File::create(&zip_path)
+        .map_err(|e| format!("Falha ao criar arquivo: {}", e))?;
+    let mut reader = response.into_reader();
+    std::io::copy(&mut reader, &mut out)
+        .map_err(|e| format!("Falha ao salvar zip: {}", e))?;
+
+    // Extract llama-server.exe from zip
+    let zip_file = fs::File::open(&zip_path)
+        .map_err(|e| format!("Falha ao abrir zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(zip_file)
+        .map_err(|e| format!("Falha ao ler zip: {}", e))?;
+
+    let _target_name = format!("build/bin/Release/{}", LLAMA_SERVER_BIN);
+    let mut found = false;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("Erro no zip: {}", e))?;
+        if entry.name().ends_with(LLAMA_SERVER_BIN) {
+            let mut out = fs::File::create(&dest).map_err(|e| format!("Falha ao extrair: {}", e))?;
+            std::io::copy(&mut entry, &mut out).map_err(|e| format!("Falha ao copiar: {}", e))?;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return Err("llama-server.exe não encontrado dentro do zip".into());
+    }
+
+    let _ = fs::remove_file(&zip_path);
+
+    // Make executable (no-op on Windows but safe)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("Falha ao definir permissões: {}", e))?;
+    }
+
+    Ok(dest.to_string_lossy().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1249,8 @@ pub fn run() {
             stop_llm,
             llm_status,
             execute_terminal_command,
+            check_llama_server,
+            download_llama_server,
             check_lsp_servers,
             install_lsp_server,
             get_startup_file,
