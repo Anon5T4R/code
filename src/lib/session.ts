@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 export interface Session {
   rootPath: string | null;
   tabs: { path: string | null }[];
-  activeId: string;
+  activeIndex: number;
+  cursorPositions: Record<string, { line: number; col: number }>;
 }
 
 export async function saveSession(session: Session): Promise<void> {

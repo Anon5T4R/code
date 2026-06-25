@@ -59,6 +59,7 @@ function App() {
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+  const cursorPositionsRef = useRef<Record<string, { line: number; col: number }>>({});
 
   // Reset gotoLine after MonacoWrapper consumes it
   useEffect(() => {
@@ -96,7 +97,8 @@ function App() {
     const existing = tabsRef.current.find((t) => t.path === path);
     if (existing) {
       setActiveId(existing.id);
-      if (line) setGotoLine(line);
+      const saved = cursorPositionsRef.current[path];
+      setGotoLine(line ?? saved?.line ?? null);
       return;
     }
     try {
@@ -104,7 +106,8 @@ function App() {
       const tab = newTab(path, content);
       setTabs((ts) => [...ts, tab]);
       setActiveId(tab.id);
-      if (line) setGotoLine(line);
+      const saved = cursorPositionsRef.current[path];
+      setGotoLine(line ?? saved?.line ?? null);
     } catch (e) {
       console.error("Failed to open file:", e);
     }
@@ -179,6 +182,9 @@ function App() {
         // Restore session
         if (s.rootPath) setRootPath(s.rootPath);
         if (s.tabs.length === 0) return;
+        if (s.cursorPositions) {
+          cursorPositionsRef.current = { ...s.cursorPositions };
+        }
         Promise.all(
           s.tabs.map(async (t) => {
             if (!t.path) return newTab();
@@ -193,8 +199,8 @@ function App() {
           const valid = restoredTabs.filter(Boolean) as Tab[];
           if (valid.length === 0) return;
           setTabs(valid);
-          const active = valid.find((t) => t.id === s.activeId) || valid[0];
-          setActiveId(active.id);
+          const idx = Math.min(s.activeIndex, valid.length - 1);
+          setActiveId(valid[idx].id);
         });
       });
     });
@@ -228,10 +234,12 @@ function App() {
       const tbs = tabsRef.current;
       const id = activeIdRef.current;
       if (tbs.length === 1 && !tbs[0].path && !tbs[0].dirty) return;
+      const activeIndex = tbs.findIndex((t) => t.id === id);
       saveSession({
         rootPath: rootPath,
         tabs: tbs.map((t) => ({ path: t.path })),
-        activeId: id,
+        activeIndex: Math.max(0, activeIndex),
+        cursorPositions: { ...cursorPositionsRef.current },
       });
     }, 500);
     return () => { if (sessionTimer.current) clearTimeout(sessionTimer.current); };
@@ -405,6 +413,10 @@ function App() {
                 onCursorPosition={(line, col) => {
                   setCursorLine(line);
                   setCursorCol(col);
+                  const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+                  if (tab?.path) {
+                    cursorPositionsRef.current[tab.path] = { line, col };
+                  }
                 }}
                 onChange={(val) => {
                   setTabs((ts) =>
