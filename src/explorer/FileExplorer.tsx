@@ -6,29 +6,12 @@ interface FileExplorerProps {
   onOpenFile: (path: string) => void;
 }
 
-interface TreeNode {
-  entry: FileEntry;
-  children: TreeNode[];
-  expanded: boolean;
-}
-
-function buildTree(entries: FileEntry[], expanded: Set<string>): TreeNode[] {
-  const roots: TreeNode[] = [];
-  for (const e of entries) {
-    roots.push({
-      entry: e,
-      children: [],
-      expanded: expanded.has(e.path),
-    });
-  }
-  return roots;
-}
-
 export function FileExplorer({
   rootPath,
   onOpenFile,
 }: FileExplorerProps) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [childrenMap, setChildrenMap] = useState<Record<string, FileEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -55,20 +38,34 @@ export function FileExplorer({
     refresh();
   }, [refresh]);
 
+  const loadChildren = useCallback(async (dirPath: string) => {
+    try {
+      const { listDir } = await import("../lib/fs");
+      const items = await listDir(dirPath);
+      setChildrenMap((prev) => ({ ...prev, [dirPath]: items }));
+    } catch (e) {
+      console.error("Failed to list children:", e);
+    }
+  }, []);
+
   const handleDoubleClick = useCallback(
     (entry: FileEntry) => {
       if (entry.is_dir) {
         setExpanded((prev) => {
           const next = new Set(prev);
-          if (next.has(entry.path)) next.delete(entry.path);
-          else next.add(entry.path);
+          if (next.has(entry.path)) {
+            next.delete(entry.path);
+          } else {
+            next.add(entry.path);
+            loadChildren(entry.path);
+          }
           return next;
         });
       } else {
         onOpenFile(entry.path);
       }
     },
-    [onOpenFile]
+    [onOpenFile, loadChildren]
   );
 
   const handleContextMenu = useCallback(
@@ -156,45 +153,52 @@ export function FileExplorer({
     [refresh]
   );
 
-  const tree = buildTree(entries, expanded);
-
-  const renderTree = (nodes: TreeNode[], depth: number): React.ReactNode => {
-    return nodes.map((node) => (
-      <div key={node.entry.path}>
-        <div
-          className={`explorer-item ${node.entry.is_dir ? "dir" : "file"}`}
-          style={{ paddingLeft: depth * 16 + 8 }}
-          onDoubleClick={() => handleDoubleClick(node.entry)}
-          onContextMenu={(e) => handleContextMenu(e, node.entry.path)}
-        >
-          <span className="explorer-icon">
-            {node.entry.is_dir ? (node.expanded ? "▼" : "▶") : "📄"}
-          </span>
-          {renaming === node.entry.path ? (
-            <input
-              className="explorer-rename-input"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={doRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") doRename();
-                if (e.key === "Escape") setRenaming(null);
-              }}
-              autoFocus
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : (
-            <span className="explorer-name">{node.entry.name}</span>
+  const renderTree = (items: FileEntry[], depth: number): React.ReactNode => {
+    return items.map((entry) => {
+      const isExpanded = expanded.has(entry.path);
+      const children = childrenMap[entry.path];
+      return (
+        <div key={entry.path}>
+          <div
+            className={`explorer-item ${entry.is_dir ? "dir" : "file"}`}
+            style={{ paddingLeft: depth * 16 + 8 }}
+            onDoubleClick={() => handleDoubleClick(entry)}
+            onContextMenu={(e) => handleContextMenu(e, entry.path)}
+          >
+            <span className="explorer-icon">
+              {entry.is_dir ? (isExpanded ? "▼" : "▶") : "📄"}
+            </span>
+            {renaming === entry.path ? (
+              <input
+                className="explorer-rename-input"
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={doRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") doRename();
+                  if (e.key === "Escape") setRenaming(null);
+                }}
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="explorer-name">{entry.name}</span>
+            )}
+          </div>
+          {entry.is_dir && isExpanded && (
+            <div className="explorer-children">
+              {!children ? (
+                <div className="explorer-loading">Carregando...</div>
+              ) : children.length === 0 ? (
+                <div className="explorer-empty">vazio</div>
+              ) : (
+                renderTree(children, depth + 1)
+              )}
+            </div>
           )}
         </div>
-        {node.entry.is_dir && node.expanded && (
-          <div className="explorer-children">
-            {node.children.length === 0 && <div className="explorer-empty">vazio</div>}
-            {renderTree(node.children, depth + 1)}
-          </div>
-        )}
-      </div>
-    ));
+      );
+    });
   };
 
   if (!rootPath) {
@@ -258,7 +262,7 @@ export function FileExplorer({
         <div className="explorer-empty-state">Pasta vazia</div>
       )}
 
-      {!loading && renderTree(tree, 0)}
+      {!loading && renderTree(entries, 0)}
 
       {ctxRef[0] && (
         <div className="explorer-context-menu" style={{ position: "fixed", left: 100, top: 100 }}>
