@@ -1,0 +1,334 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
+import { MonacoWrapper } from "./editor/MonacoWrapper";
+import { FileExplorer } from "./explorer/FileExplorer";
+import { GitPanel } from "./git/GitPanel";
+import { GitHubPanel } from "./github/GitHubPanel";
+import { TerminalPanel } from "./terminal/TerminalPanel";
+import { StatusBar } from "./statusbar/StatusBar";
+import { OutlinePanel } from "./outline/OutlinePanel";
+import { SearchPanel } from "./search/SearchPanel";
+import { readFile, writeFile, extToLanguage } from "./lib/fs";
+import { getBranches } from "./lib/git";
+import type { Tab } from "./types";
+import "./App.css";
+
+const TAB_ID = () => crypto.randomUUID();
+
+function newTab(filePath?: string, content?: string): Tab {
+  const name = filePath
+    ? filePath.split("\\").pop()?.split("/").pop() || "sem-titulo"
+    : "sem-titulo";
+  const ext = filePath ? (name.split(".").pop() || "") : "";
+  return {
+    id: TAB_ID(),
+    title: name,
+    path: filePath || null,
+    language: ext ? extToLanguage(ext) : "plaintext",
+    dirty: false,
+    content: content || "",
+  };
+}
+
+function App() {
+  const [tabs, setTabs] = useState<Tab[]>([newTab()]);
+  const [activeId, setActiveId] = useState(tabs[0].id);
+  const [rootPath, setRootPath] = useState<string | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showGit, setShowGit] = useState(false);
+  const [showGitHub, setShowGitHub] = useState(false);
+  const [gitBranch, setGitBranch] = useState<string>("");
+  const [cursorLine, setCursorLine] = useState(1);
+  const [cursorCol, setCursorCol] = useState(1);
+  const [gotoLine, setGotoLine] = useState<number | null>(null);
+
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  // Reset gotoLine after MonacoWrapper consumes it
+  useEffect(() => {
+    if (gotoLine != null) setGotoLine(null);
+  }, [gotoLine]);
+
+  const activeTab = tabs.find((t) => t.id === activeId);
+  const repoPath = rootPath;
+
+  // ---- Git branch polling ----
+  useEffect(() => {
+    if (!rootPath) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const branches = await getBranches(rootPath);
+        if (!cancelled) {
+          const current = branches.find((b) => b.current);
+          setGitBranch(current?.name || "");
+        }
+      } catch {
+        if (!cancelled) setGitBranch("");
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [rootPath]);
+
+  // ---- File operations ----
+  const openFile = useCallback(async (path: string, line?: number) => {
+    const existing = tabsRef.current.find((t) => t.path === path);
+    if (existing) {
+      setActiveId(existing.id);
+      if (line) setGotoLine(line);
+      return;
+    }
+    try {
+      const content = await readFile(path);
+      const tab = newTab(path, content);
+      setTabs((ts) => [...ts, tab]);
+      setActiveId(tab.id);
+      if (line) setGotoLine(line);
+    } catch (e) {
+      console.error("Failed to open file:", e);
+    }
+  }, []);
+
+  const saveFile = useCallback(async () => {
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!tab || !tab.path) return;
+    try {
+      await writeFile(tab.path, tab.content);
+      setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, dirty: false } : t)));
+    } catch (e) {
+      console.error("Failed to save:", e);
+    }
+  }, []);
+
+  const closeTab = useCallback((id: string) => {
+    const t = tabsRef.current.find((x) => x.id === id);
+    if (!t) return;
+    if (t.dirty && !window.confirm(`"${t.title}" tem alterações não salvas. Fechar mesmo assim?`)) return;
+
+    const idx = tabsRef.current.findIndex((x) => x.id === id);
+    const remaining = tabsRef.current.filter((x) => x.id !== id);
+
+    if (remaining.length === 0) {
+      setTabs([newTab()]);
+      setActiveId("");
+      return;
+    }
+    if (id === activeIdRef.current) {
+      const neighbor = remaining[Math.min(idx, remaining.length - 1)];
+      setActiveId(neighbor.id);
+    }
+    setTabs(remaining);
+  }, []);
+
+  // ---- Open folder dialog ----
+  const openFolder = useCallback(async () => {
+    try {
+      const selected = await open({ directory: true, multiple: false, title: "Abrir pasta" });
+      if (selected) {
+        setRootPath(selected);
+      }
+    } catch (e) {
+      console.error("Failed to open folder:", e);
+    }
+  }, []);
+
+  // ---- Startup file from command line or second instance ----
+  const openedStartup = useRef(false);
+  useEffect(() => {
+    if (openedStartup.current) return;
+    openedStartup.current = true;
+    invoke<string | null>("get_startup_file")
+      .then((p) => { if (p) openFile(p); })
+      .catch(() => {});
+    const un = listen<string>("open-file", (e) => {
+      if (e.payload) openFile(e.payload);
+    });
+    return () => { un.then((f) => f()); };
+  }, [openFile]);
+
+  // ---- Intercept window close ----
+  useEffect(() => {
+    const unlistenPromise = listen("close-requested", async () => {
+      const dirtyCount = tabsRef.current.filter((t) => t.dirty).length;
+      if (dirtyCount > 0) {
+        const ok = await ask(
+          `Você tem ${dirtyCount} arquivo(s) com alterações não salvas.\nSair mesmo assim?`,
+          { title: "Sair do LocalCode", kind: "warning" }
+        );
+        if (!ok) return;
+      }
+      invoke("exit_app").catch(() => {});
+    });
+    return () => { unlistenPromise.then((un) => un()); };
+  }, []);
+
+  // ---- Keyboard shortcuts ----
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === "s") {
+        e.preventDefault();
+        saveFile();
+      } else if (k === "`") {
+        e.preventDefault();
+        setShowTerminal((v) => !v);
+      } else if (k === "k" && e.shiftKey) {
+        e.preventDefault();
+        openFolder();
+      } else if (k === "w") {
+        e.preventDefault();
+        closeTab(activeIdRef.current);
+      } else if (e.shiftKey && k === "g") {
+        e.preventDefault();
+        setShowGit((v) => !v);
+      } else if (e.shiftKey && k === "f") {
+        e.preventDefault();
+        setShowSearch((v) => !v);
+        setShowTerminal(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [saveFile, openFolder, closeTab]);
+
+  return (
+    <div className="app">
+      {/* Title bar / menu */}
+      <div className="title-bar">
+        <div className="title-bar-menu">
+          <span className="title-bar-brand">LocalCode</span>
+        </div>
+        <div className="title-bar-tabs">
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={`title-tab ${tab.id === activeId ? "active" : ""}`}
+              onClick={() => setActiveId(tab.id)}
+              onMouseDown={(e) => {
+                if (e.button === 1) closeTab(tab.id);
+              }}
+            >
+              <span className="title-tab-title">
+                {tab.dirty && <span className="title-tab-dirty">● </span>}
+                {tab.title}
+              </span>
+              <button
+                className="title-tab-close"
+                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button className="title-tab-new" onClick={() => {
+            const t = newTab();
+            setTabs((ts) => [...ts, t]);
+            setActiveId(t.id);
+          }}>+</button>
+        </div>
+        <div className="title-bar-actions">
+          <button className="action-btn" onClick={() => setShowGitHub((v) => !v)} title="GitHub">
+            GitHub
+          </button>
+          <button className="action-btn" onClick={() => setShowGit((v) => !v)} title="Git">
+            Git
+          </button>
+          <button className="action-btn" onClick={() => { setShowSearch((v) => !v); setShowTerminal(false); }} title="Pesquisar (Ctrl+Shift+F)">
+            🔍
+          </button>
+          <button className="action-btn" onClick={openFolder} title="Abrir pasta (Ctrl+K Ctrl+O)">
+            📂
+          </button>
+        </div>
+      </div>
+
+      <div className="workspace">
+        {/* Sidebar: file explorer, outline, search */}
+        <div className="sidebar">
+          <FileExplorer
+            rootPath={rootPath}
+            onOpenFile={openFile}
+          />
+          {activeTab && rootPath && (
+            <OutlinePanel
+              language={activeTab.language}
+              filePath={activeTab.path}
+              onSelect={(line) => {
+                setGotoLine(line + 1);
+              }}
+            />
+          )}
+          {showSearch && rootPath && (
+            <SearchPanel rootPath={rootPath} onOpenFile={openFile} />
+          )}
+        </div>
+
+        {/* Main editor area */}
+        <div className="main-content">
+          <div className="editor-area">
+            {activeTab && (
+              <MonacoWrapper
+                key={activeTab.id}
+                language={activeTab.language}
+                value={activeTab.content}
+                path={activeTab.path || undefined}
+                workspaceRoot={rootPath}
+                gotoLine={gotoLine}
+                onCursorPosition={(line, col) => {
+                  setCursorLine(line);
+                  setCursorCol(col);
+                }}
+                onChange={(val) => {
+                  setTabs((ts) =>
+                    ts.map((t) =>
+                      t.id === activeIdRef.current
+                        ? { ...t, content: val, dirty: t.path !== null }
+                        : t
+                    )
+                  );
+                }}
+              />
+            )}
+          </div>
+
+          {/* Terminal */}
+          {showTerminal && (
+            <TerminalPanel onClose={() => setShowTerminal(false)} />
+          )}
+        </div>
+
+        {/* Right panels */}
+        {(showGit || showGitHub) && (
+          <div className="side-panel">
+            {showGit && <GitPanel repoPath={repoPath} />}
+            {showGitHub && <GitHubPanel repoPath={repoPath} />}
+          </div>
+        )}
+      </div>
+
+      {/* Status bar */}
+      <StatusBar
+        language={activeTab?.language}
+        filePath={activeTab?.path}
+        gitBranch={gitBranch}
+        line={cursorLine}
+        column={cursorCol}
+      />
+    </div>
+  );
+}
+
+export default App;

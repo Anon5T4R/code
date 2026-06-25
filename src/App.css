@@ -1,0 +1,989 @@
+/* ============================================================
+   LocalCode – VS Code-inspired dark theme
+   ============================================================ */
+
+:root {
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d2d;
+  --bg-hover: #2a2d2e;
+  --bg-active: #37373d;
+  --bg-input: #3c3c3c;
+  --border: #3c3c3c;
+  --text-primary: #cccccc;
+  --text-secondary: #858585;
+  --text-muted: #6a6a6a;
+  --accent: #0078d4;
+  --accent-hover: #1e8ce6;
+  --danger: #f14c4c;
+  --success: #4ec9b0;
+  --warning: #cca700;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #424242;
+  --scrollbar-hover: #4f4f4f;
+  --title-bar-height: 35px;
+  --tab-height: 35px;
+  --status-bar-height: 22px;
+  --sidebar-width: 250px;
+  --side-panel-width: 300px;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-bg); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* ---- App layout ---- */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+/* ---- Title bar ---- */
+.title-bar {
+  display: flex;
+  align-items: center;
+  height: var(--title-bar-height);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.title-bar-brand {
+  font-weight: 600;
+  font-size: 12px;
+  padding: 0 12px;
+  color: var(--text-primary);
+  letter-spacing: 0.5px;
+  min-width: 100px;
+}
+
+.title-bar-menu {
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-tabs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-app-region: no-drag;
+  gap: 0;
+}
+
+.title-bar-tabs::-webkit-scrollbar { height: 0; }
+
+.title-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: var(--tab-height);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: background 0.1s;
+  min-width: 0;
+}
+
+.title-tab:hover {
+  background: var(--bg-hover);
+}
+
+.title-tab.active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--bg-primary);
+  margin-bottom: -1px;
+}
+
+.title-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.title-tab-dirty {
+  color: var(--warning);
+  font-size: 10px;
+}
+
+.title-tab-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.title-tab-close:hover {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.title-tab-new {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 8px;
+  height: var(--tab-height);
+}
+
+.title-tab-new:hover {
+  color: var(--text-primary);
+}
+
+.title-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+}
+
+.action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ---- Workspace ---- */
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ---- Sidebar (file explorer) ---- */
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: 170px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar:empty {
+  display: none;
+}
+
+/* ---- File explorer panel ---- */
+.explorer-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.explorer-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.explorer-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.explorer-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.explorer-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.explorer-item:hover {
+  background: var(--bg-hover);
+}
+
+.explorer-icon {
+  font-size: 10px;
+  width: 14px;
+  text-align: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.explorer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorer-children {
+  border-left: 1px solid var(--border);
+  margin-left: 8px;
+}
+
+.explorer-empty {
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.explorer-empty-state {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.explorer-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.explorer-loading {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.explorer-rename-input {
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 1px 4px;
+  outline: none;
+  width: 100%;
+  font-family: var(--font-ui);
+}
+
+.explorer-create-form {
+  padding: 4px 8px;
+}
+
+.explorer-context-menu {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.explorer-context-menu button {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 2px;
+  font-family: var(--font-ui);
+}
+
+.explorer-context-menu button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- Outline panel ---- */
+.outline-panel {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+}
+
+.outline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.outline-title {
+  color: var(--text-secondary);
+}
+
+.outline-loading {
+  color: var(--text-muted);
+  animation: pulse 1s infinite;
+}
+
+.outline-body {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.outline-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.outline-item:hover {
+  background: var(--bg-hover);
+}
+
+.outline-item-icon {
+  font-size: 10px;
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.outline-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outline-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ---- Search panel ---- */
+.search-panel {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: 250px;
+}
+
+.search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+}
+
+.search-input-area {
+  padding: 4px 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 3px 6px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  outline: none;
+  border-radius: 2px;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.search-results {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.search-result-item:hover {
+  background: var(--bg-hover);
+}
+
+.search-result-line {
+  color: var(--text-secondary);
+  font-size: 11px;
+  min-width: 32px;
+  text-align: right;
+}
+
+.search-result-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.search-result-match {
+  background: var(--warning);
+  color: #000;
+  padding: 0 1px;
+  border-radius: 1px;
+}
+
+.search-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.search-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+/* ---- Main content ---- */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.editor-area {
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ---- Side panel (Git / GitHub) ---- */
+.side-panel {
+  width: var(--side-panel-width);
+  min-width: 250px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Git panel ---- */
+.git-panel, .github-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.git-header, .github-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.git-actions, .github-header-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.git-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.git-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.git-tabs, .github-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.git-tab, .github-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  transition: all 0.1s;
+}
+
+.git-tab:hover, .github-tab:hover {
+  color: var(--text-primary);
+}
+
+.git-tab.active, .github-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.git-tab:disabled, .github-tab:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.git-section, .github-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-section-title, .github-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.git-status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.git-status-item:hover {
+  color: var(--text-primary);
+}
+
+.git-status-item.staged {
+  opacity: 0.7;
+}
+
+.git-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  min-width: 48px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.git-status-badge.modified { color: var(--warning); }
+.git-status-badge.added { color: var(--success); }
+.git-status-badge.deleted { color: var(--danger); }
+.git-status-badge.untracked { color: var(--text-muted); }
+.git-status-badge.conflicted { color: var(--danger); }
+.git-status-badge.renamed { color: var(--accent); }
+
+.git-status-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-area {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.git-commit-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  resize: vertical;
+  border-radius: 3px;
+  outline: none;
+}
+
+.git-commit-input:focus {
+  border-color: var(--accent);
+}
+
+.git-commit-btn {
+  width: 100%;
+  margin-top: 6px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
+.git-commit-btn:hover {
+  background: var(--accent-hover);
+}
+
+.git-commit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-commit-item {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.git-commit-hash {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
+.git-commit-msg {
+  display: block;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.git-commit-author {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.git-branch-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-branch-item:hover {
+  background: var(--bg-hover);
+}
+
+.git-branch-item.current {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.git-branch-icon {
+  font-size: 10px;
+}
+
+.git-empty-state, .github-empty-state {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.git-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.git-loading {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.git-message, .github-message {
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--success);
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+}
+
+/* ---- GitHub panel ---- */
+.github-auth, .github-repos, .github-pr {
+  padding: 12px;
+}
+
+.github-info {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.github-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 12px;
+  margin-bottom: 6px;
+  border-radius: 3px;
+  outline: none;
+  font-family: var(--font-ui);
+}
+
+.github-input:focus {
+  border-color: var(--accent);
+}
+
+.github-textarea {
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.github-btn {
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.github-btn:hover {
+  background: var(--accent-hover);
+}
+
+.github-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.github-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.github-repo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.github-repo-icon {
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.github-repo-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.github-repo-name {
+  color: var(--accent);
+}
+
+.github-repo-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.github-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.github-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
+}
+
+/* ---- Terminal ---- */
+.terminal-panel {
+  height: 200px;
+  min-height: 100px;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.terminal-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.terminal-container {
+  flex: 1;
+  padding: 4px;
+}
+
+/* ---- Status bar ---- */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--status-bar-height);
+  background: var(--accent);
+  padding: 0 12px;
+  font-size: 11px;
+  color: #fff;
+  user-select: none;
+}
+
+.status-bar-left, .status-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+
+.status-item:hover {
+  background: rgba(255,255,255,0.1);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.status-branch {
+  font-weight: 600;
+}
+
+.status-path {
+  opacity: 0.8;
+}

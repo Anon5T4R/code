@@ -1,0 +1,33 @@
+[package]
+name = "code"
+version = "0.1.0"
+description = "LocalCode - A lightweight, fast code editor"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "code_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+git2 = "0.19"
+octocrab = "0.38"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+lsp-types = "0.95"
+portable-pty = "0.8"
+futures-util = "0.3"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
