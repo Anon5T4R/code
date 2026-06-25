@@ -11,6 +11,8 @@ import { TerminalPanel } from "./terminal/TerminalPanel";
 import { StatusBar } from "./statusbar/StatusBar";
 import { OutlinePanel } from "./outline/OutlinePanel";
 import { SearchPanel } from "./search/SearchPanel";
+import { AiPanel } from "./ai/AiPanel";
+import { LspSetupPanel } from "./lsp-setup/LspSetupPanel";
 import { readFile, writeFile, extToLanguage } from "./lib/fs";
 import { getBranches } from "./lib/git";
 import type { Tab } from "./types";
@@ -41,6 +43,8 @@ function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [showGit, setShowGit] = useState(false);
   const [showGitHub, setShowGitHub] = useState(false);
+  const [showAi, setShowAi] = useState(false);
+  const [showLspSetup, setShowLspSetup] = useState(false);
   const [gitBranch, setGitBranch] = useState<string>("");
   const [cursorLine, setCursorLine] = useState(1);
   const [cursorCol, setCursorCol] = useState(1);
@@ -240,6 +244,12 @@ function App() {
           }}>+</button>
         </div>
         <div className="title-bar-actions">
+          <button className="action-btn" onClick={() => setShowAi((v) => !v)} title="AI Assistant (Ctrl+Shift+I)">
+            AI
+          </button>
+          <button className="action-btn" onClick={() => setShowLspSetup((v) => !v)} title="LSP Setup">
+            LSP
+          </button>
           <button className="action-btn" onClick={() => setShowGitHub((v) => !v)} title="GitHub">
             GitHub
           </button>
@@ -311,10 +321,12 @@ function App() {
         </div>
 
         {/* Right panels */}
-        {(showGit || showGitHub) && (
+        {(showGit || showGitHub || showAi || showLspSetup) && (
           <div className="side-panel">
             {showGit && <GitPanel repoPath={repoPath} />}
             {showGitHub && <GitHubPanel repoPath={repoPath} />}
+            {showAi && <AiPanel />}
+            {showLspSetup && <LspSetupPanel />}
           </div>
         )}
       </div>

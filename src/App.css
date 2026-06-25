@@ -987,3 +987,475 @@ html, body, #root {
 .status-path {
   opacity: 0.8;
 }
+
+/* ---- AI panel ---- */
+.ai-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.ai-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.ai-header-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.ai-config-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.ai-config-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ai-config {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ai-config h3 {
+  font-size: 13px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.ai-config label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.ai-input-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ai-input-row input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 6px;
+  font-size: 12px;
+  outline: none;
+  border-radius: 3px;
+}
+
+.ai-input-row button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  white-space: nowrap;
+}
+
+.ai-input-row button:hover {
+  background: var(--accent-hover);
+}
+
+.ai-model-list h4 {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.ai-model-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.ai-model-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+}
+
+.ai-model-size {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ai-model-item button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+}
+
+.ai-model-item button:hover {
+  background: var(--accent-hover);
+}
+
+.ai-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--success);
+}
+
+.ai-status-row button {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+}
+
+.ai-chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-msg {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-msg-content {
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-msg-user {
+  align-items: flex-end;
+}
+
+.ai-msg-user .ai-msg-content {
+  background: var(--accent);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px 8px 2px 8px;
+  max-width: 85%;
+}
+
+.ai-msg-assistant .ai-msg-content {
+  background: var(--bg-tertiary);
+  padding: 6px 10px;
+  border-radius: 8px 8px 8px 2px;
+  max-width: 100%;
+}
+
+.ai-reasoning {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.ai-reasoning summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.ai-tool-history {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.ai-tool-line {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 2px 0;
+}
+
+.ai-tool-confirm {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--warning);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 4px 0;
+}
+
+.ai-tool-confirm-header {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ai-tool-confirm-detail {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.ai-tool-confirm-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.ai-confirm-btn, .ai-reject-btn {
+  flex: 1;
+  border: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+}
+
+.ai-confirm-btn {
+  background: var(--success);
+  color: #000;
+}
+
+.ai-confirm-btn:hover {
+  opacity: 0.9;
+}
+
+.ai-reject-btn {
+  background: var(--danger);
+  color: #fff;
+}
+
+.ai-reject-btn:hover {
+  opacity: 0.9;
+}
+
+.ai-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-input-bar input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 12px;
+  outline: none;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+}
+
+.ai-input-bar input:focus {
+  border-color: var(--accent);
+}
+
+.ai-input-bar button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+}
+
+.ai-input-bar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-input-bar button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* ---- LSP Setup panel ---- */
+.lsp-setup-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.lsp-setup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.lsp-refresh-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.lsp-refresh-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.lsp-all-ok {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lsp-setup-info {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.lsp-server-list {
+  padding: 4px 0;
+}
+
+.lsp-server-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.lsp-server-item.installed {
+  opacity: 0.7;
+}
+
+.lsp-server-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lsp-server-name {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.lsp-server-badge.ok {
+  color: var(--success);
+}
+
+.lsp-server-badge.missing {
+  color: var(--danger);
+}
+
+.lsp-server-actions {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lsp-install-hint {
+  flex: 1;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lsp-install-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  white-space: nowrap;
+}
+
+.lsp-install-btn:hover {
+  background: var(--accent-hover);
+}
+
+.lsp-install-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.lsp-log {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.lsp-log h4 {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.lsp-log-line {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 1px 0;
+}

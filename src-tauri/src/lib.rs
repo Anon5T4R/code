@@ -1,7 +1,11 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 
 mod lsp;
@@ -787,6 +791,313 @@ fn exit_app(app: tauri::AppHandle) {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Local AI: llama-server lifecycle
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct LlmState {
+    child: Option<Child>,
+    port: u16,
+    model: String,
+}
+
+#[derive(Serialize)]
+struct ModelInfo {
+    name: String,
+    path: String,
+    size_gb: f64,
+    is_projector: bool,
+}
+
+#[derive(Serialize)]
+struct LlmStatus {
+    running: bool,
+    port: u16,
+    model: String,
+}
+
+fn collect_gguf(dir: &Path, base: &Path, out: &mut Vec<ModelInfo>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_gguf(&path, base, out);
+        } else if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("gguf"))
+            .unwrap_or(false)
+        {
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            out.push(ModelInfo {
+                name: path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string(),
+                path: path.to_string_lossy().to_string(),
+                size_gb: (size as f64) / 1_000_000_000.0,
+                is_projector: file_name.to_lowercase().starts_with("mmproj"),
+            });
+        }
+    }
+}
+
+const LLAMA_SERVER_BIN: &str = if cfg!(windows) { "llama-server.exe" } else { "llama-server" };
+
+fn resolve_llama_server(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let rel = format!("binaries/llama/{}", LLAMA_SERVER_BIN);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join(&rel));
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        candidates.push(res.join(&rel));
+        candidates.push(res.join(format!("llama/{}", LLAMA_SERVER_BIN)));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(&rel));
+            candidates.push(dir.join(format!("llama/{}", LLAMA_SERVER_BIN)));
+        }
+    }
+    for c in candidates {
+        if c.exists() {
+            return Ok(c);
+        }
+    }
+    Err("llama-server não encontrado (runtime de IA ausente). Baixe em: https://github.com/ggml-org/llama.cpp/releases".into())
+}
+
+fn wait_for_port(port: u16, secs: u64) -> Result<(), String> {
+    let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+    let attempts = secs * 4;
+    for _ in 0..attempts {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err("llama-server não respondeu a tempo".into())
+}
+
+#[tauri::command]
+fn list_models(dir: String) -> Result<Vec<ModelInfo>, String> {
+    let base = PathBuf::from(&dir);
+    if !base.exists() {
+        return Err(format!("Pasta de modelos não encontrada: {}", dir));
+    }
+    let mut out = Vec::new();
+    collect_gguf(&base, &base, &mut out);
+    out.sort_by(|a, b| a.size_gb.partial_cmp(&b.size_gb).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+#[tauri::command]
+fn start_llm(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Mutex<LlmState>>,
+    model_path: String,
+    n_gpu_layers: i32,
+    ctx_size: u32,
+) -> Result<u16, String> {
+    {
+        let mut s = state.lock().map_err(|_| "estado da IA corrompido")?;
+        if let Some(child) = s.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        s.child = None;
+    }
+
+    let exe = resolve_llama_server(&app)?;
+    let dir = exe.parent().ok_or("diretório do llama inválido")?.to_path_buf();
+    let port: u16 = 8090;
+
+    let mut cmd = Command::new(&exe);
+    cmd.current_dir(&dir).args([
+        "--model",
+        &model_path,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+        "-ngl",
+        &n_gpu_layers.to_string(),
+        "-c",
+        &ctx_size.to_string(),
+        "--no-webui",
+    ]);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("falha ao iniciar llama-server: {}", e))?;
+
+    {
+        let mut s = state.lock().map_err(|_| "estado da IA corrompido")?;
+        s.child = Some(child);
+        s.port = port;
+        s.model = model_path;
+    }
+
+    wait_for_port(port, 180)?;
+    Ok(port)
+}
+
+#[tauri::command]
+fn stop_llm(state: tauri::State<'_, Mutex<LlmState>>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|_| "estado da IA corrompido")?;
+    if let Some(child) = s.child.as_mut() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    s.child = None;
+    s.model.clear();
+    Ok(())
+}
+
+#[tauri::command]
+fn llm_status(state: tauri::State<'_, Mutex<LlmState>>) -> LlmStatus {
+    let mut s = state.lock().expect("estado da IA");
+    let running = match s.child.as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(None)),
+        None => false,
+    };
+    LlmStatus {
+        running,
+        port: s.port,
+        model: s.model.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Agent: execute a terminal command (with user confirmation in frontend)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+fn execute_terminal_command(command: String) -> Result<String, String> {
+    let output = if cfg!(windows) {
+        Command::new("cmd").args(["/C", &command]).output()
+    } else {
+        Command::new("sh").args(["-c", &command]).output()
+    }
+    .map_err(|e| format!("Falha ao executar comando: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if output.status.success() {
+        Ok(if stdout.is_empty() { stderr } else { stdout })
+    } else {
+        Err(if stderr.is_empty() { stdout } else { stderr })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LSP server detection & installation
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct LspServerStatus {
+    name: String,
+    installed: bool,
+    install_hint: String,
+}
+
+fn check_command(cmd: &str) -> bool {
+    // Try `cmd --version` on PATH
+    #[cfg(windows)]
+    let check = Command::new("where").arg(cmd).output().is_ok();
+    #[cfg(not(windows))]
+    let check = Command::new("which").arg(cmd).output().is_ok();
+    check
+}
+
+#[tauri::command]
+fn check_lsp_servers() -> Vec<LspServerStatus> {
+    vec![
+        LspServerStatus {
+            name: "typescript-language-server".into(),
+            installed: check_command("typescript-language-server"),
+            install_hint: "npm install -g typescript-language-server".into(),
+        },
+        LspServerStatus {
+            name: "rust-analyzer".into(),
+            installed: check_command("rust-analyzer"),
+            install_hint: "rustup component add rust-analyzer".into(),
+        },
+        LspServerStatus {
+            name: "pylsp".into(),
+            installed: check_command("pylsp"),
+            install_hint: "pip install python-lsp-server".into(),
+        },
+        LspServerStatus {
+            name: "gopls".into(),
+            installed: check_command("gopls"),
+            install_hint: "go install golang.org/x/tools/gopls@latest".into(),
+        },
+        LspServerStatus {
+            name: "yaml-language-server".into(),
+            installed: check_command("yaml-language-server"),
+            install_hint: "npm install -g yaml-language-server".into(),
+        },
+        LspServerStatus {
+            name: "vscode-html-language-server".into(),
+            installed: check_command("vscode-html-language-server"),
+            install_hint: "npm install -g vscode-langservers-extracted".into(),
+        },
+        LspServerStatus {
+            name: "vscode-css-language-server".into(),
+            installed: check_command("vscode-css-language-server"),
+            install_hint: "npm install -g vscode-langservers-extracted".into(),
+        },
+        LspServerStatus {
+            name: "vscode-json-language-server".into(),
+            installed: check_command("vscode-json-language-server"),
+            install_hint: "npm install -g vscode-langservers-extracted".into(),
+        },
+    ]
+}
+
+/// Execute an install command (npm/pip/go/rustup) for a language server.
+/// Returns stdout on success, stderr on failure.
+#[tauri::command]
+fn install_lsp_server(name: String) -> Result<String, String> {
+    let (cmd, args): (&str, Vec<&str>) = match name.as_str() {
+        "typescript-language-server" => ("cmd", vec!["/c", "npm", "install", "-g", "typescript-language-server"]),
+        "rust-analyzer" => ("rustup", vec!["component", "add", "rust-analyzer"]),
+        "pylsp" => ("pip", vec!["install", "python-lsp-server"]),
+        "gopls" => ("go", vec!["install", "golang.org/x/tools/gopls@latest"]),
+        "yaml-language-server" => ("cmd", vec!["/c", "npm", "install", "-g", "yaml-language-server"]),
+        n if n.starts_with("vscode-") => ("cmd", vec!["/c", "npm", "install", "-g", "vscode-langservers-extracted"]),
+        _ => return Err(format!("LSP '{}' desconhecido", name)),
+    };
+
+    let output = Command::new(cmd)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("Falha ao executar instalação: {}", e))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -803,6 +1114,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(Arc::new(LspManager::new()))
         .manage(Arc::new(TerminalManager::new()))
+        .manage(Mutex::new(LlmState::default()))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -853,10 +1165,27 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_kill,
+            list_models,
+            start_llm,
+            stop_llm,
+            llm_status,
+            execute_terminal_command,
+            check_lsp_servers,
+            install_lsp_server,
             get_startup_file,
             exit_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, _event| {});
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<Mutex<LlmState>>() {
+                    if let Ok(mut s) = state.lock() {
+                        if let Some(child) = s.child.as_mut() {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+            }
+        });
 }

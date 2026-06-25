@@ -48,7 +48,7 @@ export function FileExplorer({
     }
   }, []);
 
-  const handleDoubleClick = useCallback(
+  const handleClick = useCallback(
     (entry: FileEntry) => {
       if (entry.is_dir) {
         setExpanded((prev) => {
@@ -162,7 +162,7 @@ export function FileExplorer({
           <div
             className={`explorer-item ${entry.is_dir ? "dir" : "file"}`}
             style={{ paddingLeft: depth * 16 + 8 }}
-            onDoubleClick={() => handleDoubleClick(entry)}
+            onClick={() => handleClick(entry)}
             onContextMenu={(e) => handleContextMenu(e, entry.path)}
           >
             <span className="explorer-icon">
