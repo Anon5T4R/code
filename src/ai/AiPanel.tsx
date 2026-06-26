@@ -5,7 +5,7 @@ import {
   waitHealthy, streamChat,
 } from "../lib/ai";
 import { loadSettings, saveSettings } from "../lib/settings";
-import { AGENT_SYSTEM_PROMPT, parseToolCall, executeTool } from "./agent";
+import { AGENT_SYSTEM_PROMPT, parseToolCall, executeTool, normalizeArgs } from "./agent";
 
 interface AiPanelProps {
   workspaceRoot?: string | null;
@@ -16,6 +16,7 @@ export function AiPanel({ workspaceRoot, onRefresh }: AiPanelProps) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{ running: boolean; port: number; model: string }>({ running: false, port: 0, model: "" });
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDir, setModelDir] = useState(loadSettings().modelsDir);
@@ -53,6 +54,7 @@ export function AiPanel({ workspaceRoot, onRefresh }: AiPanelProps) {
   }, [modelDir]);
 
   const handleStartLlm = useCallback(async (modelPath: string) => {
+    setLoading(true);
     try {
       const settings = loadSettings();
       const port = await startLlm(modelPath, settings.ngl, settings.ctx);
@@ -65,6 +67,7 @@ export function AiPanel({ workspaceRoot, onRefresh }: AiPanelProps) {
     } catch (e: any) {
       setMessages((prev) => [...prev, { role: "user", content: `Erro ao iniciar IA: ${e}` }]);
     }
+    setLoading(false);
   }, [refreshStatus]);
 
   const handleStopLlm = useCallback(async () => {
@@ -72,9 +75,29 @@ export function AiPanel({ workspaceRoot, onRefresh }: AiPanelProps) {
     await refreshStatus();
   }, [refreshStatus]);
 
-  const executeAgentTool = useCallback(async (tool: string, args: Record<string, any>) => {
-    setPendingTool({ tool, args });
+  const handleAbort = useCallback(() => {
+    abortRef.current?.abort();
+    setStreaming(false);
   }, []);
+
+  const executeAgentTool = useCallback(async (tool: string, rawArgs: Record<string, any>) => {
+    const args = normalizeArgs(rawArgs, tool);
+
+    // Tools que executam automaticamente sem confirmação
+    const autoTools = new Set(["create_file", "edit_file", "read_file", "list_dir", "search_files", "rename_file"]);
+    if (autoTools.has(tool)) {
+      setToolHistory((prev) => [...prev, `🔧 ${tool}(${JSON.stringify(args)})...`]);
+      const result = await executeTool(tool, args, workspaceRoot || undefined);
+      setToolHistory((prev) => [...prev, result.success ? `  ✅ ${result.output}` : `  ❌ ${result.output}`]);
+      if (result.success && (tool === "create_file" || tool === "edit_file" || tool === "rename_file")) {
+        onRefresh?.();
+      }
+      return;
+    }
+
+    // delete_file e execute_command requerem confirmação
+    setPendingTool({ tool, args });
+  }, [workspaceRoot, onRefresh]);
 
   const confirmTool = useCallback(async () => {
     if (!pendingTool) return;
@@ -227,6 +250,13 @@ export function AiPanel({ workspaceRoot, onRefresh }: AiPanelProps) {
             </div>
           )}
 
+          {loading && (
+            <div className="ai-loading-overlay">
+              <div className="ai-loading-spinner"></div>
+              <span>Carregando modelo... isso pode levar alguns minutos</span>
+            </div>
+          )}
+
           {status.running && (
             <div className="ai-status-row">
               <span>🟢 Rodando: {status.model.split(/[\\/]/).pop()}</span>
@@ -313,9 +343,15 @@ export function AiPanel({ workspaceRoot, onRefresh }: AiPanelProps) {
           placeholder={agentMode ? "Peça algo (ex: crie um arquivo...)" : "Pergunte algo..."}
           disabled={streaming}
         />
-        <button onClick={handleSend} disabled={streaming || !input.trim()}>
-          {streaming ? "..." : "→"}
-        </button>
+        {streaming ? (
+          <button className="ai-stop-btn" onClick={handleAbort} title="Parar resposta">
+            ■
+          </button>
+        ) : (
+          <button onClick={handleSend} disabled={!input.trim()}>
+            →
+          </button>
+        )}
       </div>
     </div>
   );

@@ -114,6 +114,26 @@ Para usar uma ferramenta, responda com um objeto JSON na seguinte estrutura:
 Você pode chamar várias ferramentas em sequência, uma por resposta.
 Se o usuário pedir algo que não requer ferramentas, responda normalmente.`;
 
+export function normalizeArgs(args: Record<string, any>, tool: string): Record<string, any> {
+  // Models often use file_path / file_content instead of path / content
+  const aliases: Record<string, Record<string, string>> = {
+    create_file: { file_path: "path", file_content: "content" },
+    read_file: { file_path: "path" },
+    edit_file: { file_path: "path" },
+    delete_file: { file_path: "path" },
+    rename_file: { file_path: "old_path" },
+  };
+  const normalized = { ...args };
+  const map = aliases[tool] || {};
+  for (const [from, to] of Object.entries(map)) {
+    if (from in normalized && !(to in normalized)) {
+      normalized[to] = normalized[from];
+      delete normalized[from];
+    }
+  }
+  return normalized;
+}
+
 export function parseToolCall(text: string): { tool: string; args: Record<string, any> } | null {
   try {
     const parsed = JSON.parse(text);
