@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ask } from "@tauri-apps/plugin-dialog";
-import { open } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { MonacoWrapper } from "./editor/MonacoWrapper";
 import { FileExplorer } from "./explorer/FileExplorer";
 import { GitPanel } from "./git/GitPanel";
@@ -114,10 +113,33 @@ function App() {
 
   const saveFile = useCallback(async () => {
     const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
-    if (!tab || !tab.path) return;
+    if (!tab) return;
+    let filePath = tab.path;
+    if (!filePath) {
+      const selected = await save({
+        title: "Salvar arquivo",
+        defaultPath: tab.title,
+      });
+      if (!selected) return;
+      filePath = selected;
+    }
     try {
-      await writeFile(tab.path, tab.content);
-      setTabs((ts) => ts.map((t) => (t.id === tab.id ? { ...t, dirty: false, savedContent: t.content } : t)));
+      await writeFile(filePath, tab.content);
+      const ext = (filePath.split(".").pop() || "");
+      setTabs((ts) =>
+        ts.map((t) =>
+          t.id === tab.id
+            ? {
+                ...t,
+                path: filePath,
+                title: basename(filePath),
+                language: extToLanguage(ext),
+                dirty: false,
+                savedContent: t.content,
+              }
+            : t
+        )
+      );
     } catch (e) {
       console.error("Failed to save:", e);
     }
