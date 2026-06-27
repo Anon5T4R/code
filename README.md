@@ -57,6 +57,8 @@ To use GitHub integration with device flow login:
 3. Set "Authorization callback URL" to `http://localhost:1420`
 4. Copy the Client ID
 5. In LocalCode Settings (⚙️), paste the Client ID into `githubClientId`
+
+> O token é salvo no cofre de credenciais do SO (crate `keyring`). **No Linux** é preciso ter um Secret Service ativo (gnome-keyring/KWallet); sem ele, salvar o token falha com erro.
 6. Click "Login with GitHub" — a code will appear. Press the link to open the device activation page, enter the code, and authorize.
 
 > The official LocalCode OAuth app Client ID will be documented here when registered.

@@ -11,6 +11,21 @@ export default defineConfig(async () => ({
   },
 
   clearScreen: false,
+  build: {
+    // Split the heavy Monaco core into its own chunk so the app entry stays
+    // small. All chunks are still loaded locally, so this is purely cosmetic
+    // (no lazy-loading) — it just silences the size warning and speeds parsing.
+    chunkSizeWarningLimit: 5000,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes("node_modules/monaco-editor") || id.includes("node_modules/@monaco-editor")) {
+            return "monaco";
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

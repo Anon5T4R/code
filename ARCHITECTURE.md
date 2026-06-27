@@ -86,7 +86,7 @@ Roda um modelo local GGUF via **`llama-server`** (API compatível com OpenAI em 
 |------|------|
 | Settings (tema, idioma, ngl/ctx, modelsDir, githubClientId) | `localStorage` (`localcode.settings`) |
 | Sessão (abas, raiz, cursores) | `app_data/session.json` |
-| Token GitHub | Cofre de credenciais do SO via crate `keyring` (Windows Credential Manager / macOS Keychain / Linux Secret Service). `.github_token.bin` legado é migrado e apagado no primeiro acesso. |
+| Token GitHub | Cofre de credenciais do SO via crate `keyring` (Windows Credential Manager / macOS Keychain / Linux Secret Service). `.github_token.bin` legado é migrado e apagado no primeiro acesso. **No Linux** requer um Secret Service ativo (gnome-keyring/KWallet); em ambiente headless/minimalista o salvamento do token falha com erro visível. |
 | llama-server baixado | `app_data/binaries/llama/` |
 
 ## Build e execução

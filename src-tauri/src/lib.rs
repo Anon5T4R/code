@@ -173,6 +173,8 @@ fn search_in_content(
             (line.to_lowercase(), search_for_lower.clone())
         };
 
+        // Offsets are reported as CHARACTER indices (not bytes) so the frontend
+        // can slice `line_content` correctly even with multibyte (e.g. accented) text.
         if let Some(re) = re {
             for m in re.find_iter(&search_in) {
                 let col = m.start();
@@ -182,20 +184,22 @@ fn search_in_content(
                     let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
                     if before || after { continue; }
                 }
+                let char_start = search_in[..col].chars().count();
+                let char_end = search_in[..end].chars().count();
                 out.push(SearchMatch {
                     path: path.to_string(),
                     line: (line_idx + 1) as u32,
-                    column: (col + 1) as u32,
+                    column: (char_start + 1) as u32,
                     line_content: line.to_string(),
-                    match_start: col as u32,
-                    match_end: end as u32,
+                    match_start: char_start as u32,
+                    match_end: char_end as u32,
                 });
             }
         } else {
             let mut start = 0;
             while let Some(col) = search_in[start..].find(&search_for) {
                 let abs_col = start + col;
-                let end = abs_col + query.len();
+                let end = abs_col + search_for.len();
                 if whole_word {
                     let before = abs_col > 0 && search_in.as_bytes().get(abs_col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
                     let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
@@ -204,13 +208,15 @@ fn search_in_content(
                         continue;
                     }
                 }
+                let char_start = search_in[..abs_col].chars().count();
+                let char_end = search_in[..end].chars().count();
                 out.push(SearchMatch {
                     path: path.to_string(),
                     line: (line_idx + 1) as u32,
-                    column: (abs_col + 1) as u32,
+                    column: (char_start + 1) as u32,
                     line_content: line.to_string(),
-                    match_start: abs_col as u32,
-                    match_end: end as u32,
+                    match_start: char_start as u32,
+                    match_end: char_end as u32,
                 });
                 start = abs_col + 1;
             }
@@ -394,6 +400,17 @@ fn list_workspace_files(root: String, max: Option<usize>) -> Result<Vec<String>,
 // File watching
 // ---------------------------------------------------------------------------
 
+/// Paths whose churn we don't care about: `node_modules`, build output, and the
+/// `.git` internals — except `.git/HEAD`, which we keep so branch switches are
+/// detected. Cuts down the event storms during installs, builds and git ops.
+fn is_noise_path(p: &Path) -> bool {
+    let s = p.to_string_lossy().replace('\\', "/");
+    if s.ends_with("/.git/HEAD") || s.ends_with(".git/HEAD") {
+        return false;
+    }
+    s.split('/').any(|seg| seg == "node_modules" || seg == "target" || seg == ".git")
+}
+
 struct WatcherState {
     watcher: Option<Box<dyn notify::Watcher + Send>>,
 }
@@ -424,7 +441,10 @@ async fn watch_workspace(
                         | EventKind::Remove(_)
                         | EventKind::Modify(notify::event::ModifyKind::Name(_))
                 );
-                if relevant {
+                // Ignore events that only touch noise paths (node_modules, target, .git).
+                let meaningful = event.paths.is_empty()
+                    || event.paths.iter().any(|p| !is_noise_path(p));
+                if relevant && meaningful {
                     let _ = tx.blocking_send(());
                 }
             }

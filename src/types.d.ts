@@ -44,4 +44,6 @@ export interface Tab {
   dirty: boolean;
   content: string;
   savedContent: string;
+  /** Set when the file changed on disk while the tab had unsaved edits. */
+  externallyChanged?: boolean;
 }

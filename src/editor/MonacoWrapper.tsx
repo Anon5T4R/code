@@ -26,6 +26,8 @@ interface MonacoWrapperProps {
   gotoLine?: number | null;
   path?: string;
   workspaceRoot?: string | null;
+  /** Path of a model that should be disposed (a tab was closed). */
+  disposeModelPath?: string | null;
 }
 
 export const MonacoWrapper = memo(function MonacoWrapper({
@@ -36,6 +38,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
   gotoLine,
   path,
   workspaceRoot,
+  disposeModelPath,
 }: MonacoWrapperProps) {
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
@@ -89,6 +92,19 @@ export const MonacoWrapper = memo(function MonacoWrapper({
     editor.setPosition({ lineNumber: gotoLine, column: 1 });
     editor.focus();
   }, [gotoLine]);
+
+  // Dispose the model of a closed tab to free its undo stack (it's kept alive
+  // by keepCurrentModel otherwise). Never touch the currently-open model.
+  useEffect(() => {
+    if (!disposeModelPath || disposeModelPath === path) return;
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+    try {
+      monaco.editor.getModel(monaco.Uri.parse(disposeModelPath))?.dispose();
+    } catch {
+      /* malformed uri — ignore */
+    }
+  }, [disposeModelPath, path]);
 
   // Register Monaco providers once monaco is available
   const registerProviders = useCallback(

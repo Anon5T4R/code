@@ -86,6 +86,7 @@ function App() {
   const [tabCtx, setTabCtx] = useState<{ id: string; x: number; y: number } | null>(null);
   const [fileTreeVersion, setFileTreeVersion] = useState(0);
   const [palette, setPalette] = useState<"files" | "commands" | null>(null);
+  const [modelToDispose, setModelToDispose] = useState<string | null>(null);
   const extManagerRef = useRef(new ExtensionManager());
   const [extPanels, setExtPanels] = useState<ExtensionPanel[]>([]);
   const [extCommands, setExtCommands] = useState<ExtensionCommand[]>([]);
@@ -101,6 +102,11 @@ function App() {
   useEffect(() => {
     if (gotoLine != null) setGotoLine(null);
   }, [gotoLine]);
+
+  // Reset the dispose signal after MonacoWrapper consumes it
+  useEffect(() => {
+    if (modelToDispose != null) setModelToDispose(null);
+  }, [modelToDispose]);
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const repoPath = rootPath;
@@ -119,6 +125,38 @@ function App() {
 
   useEffect(() => { refreshBranch(); }, [refreshBranch]);
 
+  // ---- Sync on-disk changes into open tab buffers ----
+  // Reloads a clean tab from disk; a tab with unsaved edits is NOT clobbered —
+  // it's flagged `externallyChanged` so the user can decide.
+  const syncTabFromDisk = useCallback(async (path: string) => {
+    const tab = tabsRef.current.find((t) => t.path === path);
+    if (!tab) return;
+    let content: string;
+    try {
+      content = await readFile(path);
+    } catch {
+      return; // file may have been deleted; leave the tab as-is
+    }
+    setTabs((ts) =>
+      ts.map((t) => {
+        if (t.path !== path) return t;
+        if (t.dirty) {
+          // Don't discard unsaved work; only flag if disk actually diverged.
+          return content === t.content ? t : { ...t, externallyChanged: true };
+        }
+        if (content === t.content) return t; // no change, avoid needless render
+        return { ...t, content, savedContent: content, dirty: false, externallyChanged: false };
+      })
+    );
+  }, []);
+
+  // Reload every open (clean) tab from disk — used after bulk operations like
+  // find-and-replace-in-files that touch many files at once.
+  const syncOpenTabsFromDisk = useCallback(async () => {
+    const paths = tabsRef.current.map((t) => t.path).filter((p): p is string => !!p);
+    await Promise.all(paths.map((p) => syncTabFromDisk(p)));
+  }, [syncTabFromDisk]);
+
   // ---- File-watching: refresh tree + git branch on any workspace change ----
   useEffect(() => {
     if (!rootPath) return;
@@ -126,12 +164,13 @@ function App() {
     const unlistenPromise = listen<null>("workspace-changed", () => {
       setFileTreeVersion((v) => v + 1);
       refreshBranch();
+      syncOpenTabsFromDisk();
     });
     return () => {
       invoke("unwatch_workspace").catch(() => {});
       unlistenPromise.then((f) => f());
     };
-  }, [rootPath, refreshBranch]);
+  }, [rootPath, refreshBranch, syncOpenTabsFromDisk]);
 
   // ---- File operations ----
   const openFile = useCallback(async (path: string, line?: number) => {
@@ -179,6 +218,7 @@ function App() {
                 language: extToLanguage(ext),
                 dirty: false,
                 savedContent: t.content,
+                externallyChanged: false,
               }
             : t
         )
@@ -208,6 +248,9 @@ function App() {
       if (!ok) return;
     }
 
+    // Free the Monaco model that backed this tab (kept alive by keepCurrentModel).
+    setModelToDispose(t.path ?? `untitled:${t.id}`);
+
     const idx = tabsRef.current.findIndex((x) => x.id === id);
     const remaining = tabsRef.current.filter((x) => x.id !== id);
 
@@ -224,20 +267,22 @@ function App() {
     setTabs(remaining);
   }, []);
 
-  // ---- Sync AI file edits into open tab buffers ----
-  const syncTabFromDisk = useCallback(async (path: string) => {
-    const tab = tabsRef.current.find((t) => t.path === path);
-    if (!tab) return;
+  // Force-reload a tab from disk, discarding local unsaved edits (confirmed).
+  const reloadTabFromDisk = useCallback(async (id: string) => {
+    const tab = tabsRef.current.find((t) => t.id === id);
+    if (!tab?.path) return;
+    const ok = await ask(`Recarregar "${tab.title}" do disco? As alterações não salvas serão perdidas.`, {
+      title: "Recarregar arquivo", kind: "warning",
+    });
+    if (!ok) return;
     try {
-      const content = await readFile(path);
+      const content = await readFile(tab.path);
       setTabs((ts) =>
         ts.map((t) =>
-          t.path === path ? { ...t, content, savedContent: content, dirty: false } : t
+          t.id === id ? { ...t, content, savedContent: content, dirty: false, externallyChanged: false } : t
         )
       );
-    } catch {
-      // file may have been deleted; leave the tab as-is
-    }
+    } catch { /* file gone; leave as-is */ }
   }, []);
 
   // ---- Open folder dialog ----
@@ -468,6 +513,16 @@ function App() {
               }}
             >
               <span className="title-tab-title">
+                {tab.externallyChanged && (
+                  <span
+                    className="title-tab-warning"
+                    title="O arquivo mudou no disco e há alterações não salvas. Clique para recarregar (descarta as edições locais)."
+                    onClick={(e) => { e.stopPropagation(); reloadTabFromDisk(tab.id); }}
+                    style={{ cursor: "pointer", color: "var(--warning, #e5c07b)" }}
+                  >
+                    ⚠{" "}
+                  </span>
+                )}
                 {tab.dirty && <span className="title-tab-dirty">● </span>}
                 {tab.title}
               </span>
@@ -549,7 +604,7 @@ function App() {
             <SearchPanel
               rootPath={rootPath}
               onOpenFile={openFile}
-              onReplaced={() => setFileTreeVersion((v) => v + 1)}
+              onReplaced={() => { setFileTreeVersion((v) => v + 1); syncOpenTabsFromDisk(); }}
             />
           )}
         </div>
@@ -573,6 +628,7 @@ function App() {
                 path={activeTab.path ?? `untitled:${activeTab.id}`}
                 workspaceRoot={rootPath}
                 gotoLine={gotoLine}
+                disposeModelPath={modelToDispose}
                 onCursorPosition={(line, col) => {
                   setCursorLine(line);
                   setCursorCol(col);
