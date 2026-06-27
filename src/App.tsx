@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { MonacoWrapper } from "./editor/MonacoWrapper";
+import { Breadcrumbs } from "./editor/Breadcrumbs";
 import { FileExplorer } from "./explorer/FileExplorer";
 import { GitPanel } from "./git/GitPanel";
 import { GitHubPanel } from "./github/GitHubPanel";
@@ -13,6 +14,7 @@ import { SearchPanel } from "./search/SearchPanel";
 import { AiPanel } from "./ai/AiPanel";
 import { LspSetupPanel } from "./lsp-setup/LspSetupPanel";
 import { SettingsPanel } from "./settings/SettingsPanel";
+import { CommandPalette, type PaletteCommand } from "./palette/CommandPalette";
 import { readFile, writeFile, extToLanguage, registerExtensionLanguages as registerFsLanguages } from "./lib/fs";
 import { registerExtensionLanguages as registerLspLanguages } from "./lib/lsp";
 import { getBranches } from "./lib/git";
@@ -83,6 +85,7 @@ function App() {
   const [gotoLine, setGotoLine] = useState<number | null>(null);
   const [tabCtx, setTabCtx] = useState<{ id: string; x: number; y: number } | null>(null);
   const [fileTreeVersion, setFileTreeVersion] = useState(0);
+  const [palette, setPalette] = useState<"files" | "commands" | null>(null);
   const extManagerRef = useRef(new ExtensionManager());
   const [extPanels, setExtPanels] = useState<ExtensionPanel[]>([]);
   const [extCommands, setExtCommands] = useState<ExtensionCommand[]>([]);
@@ -102,41 +105,33 @@ function App() {
   const activeTab = tabs.find((t) => t.id === activeId);
   const repoPath = rootPath;
 
-  // ---- File-watching ----
+  // ---- Git branch (refreshed reactively via the file watcher, not polled) ----
+  const refreshBranch = useCallback(async () => {
+    if (!rootPath) { setGitBranch(""); return; }
+    try {
+      const branches = await getBranches(rootPath);
+      const current = branches.find((b) => b.current);
+      setGitBranch(current?.name || "");
+    } catch {
+      setGitBranch("");
+    }
+  }, [rootPath]);
+
+  useEffect(() => { refreshBranch(); }, [refreshBranch]);
+
+  // ---- File-watching: refresh tree + git branch on any workspace change ----
   useEffect(() => {
     if (!rootPath) return;
     invoke("watch_workspace", { path: rootPath }).catch(() => {});
     const unlistenPromise = listen<null>("workspace-changed", () => {
       setFileTreeVersion((v) => v + 1);
+      refreshBranch();
     });
     return () => {
       invoke("unwatch_workspace").catch(() => {});
       unlistenPromise.then((f) => f());
     };
-  }, [rootPath]);
-
-  // ---- Git branch polling ----
-  useEffect(() => {
-    if (!rootPath) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const branches = await getBranches(rootPath);
-        if (!cancelled) {
-          const current = branches.find((b) => b.current);
-          setGitBranch(current?.name || "");
-        }
-      } catch {
-        if (!cancelled) setGitBranch("");
-      }
-    };
-    poll();
-    const interval = setInterval(poll, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [rootPath]);
+  }, [rootPath, refreshBranch]);
 
   // ---- File operations ----
   const openFile = useCallback(async (path: string, line?: number) => {
@@ -402,6 +397,12 @@ function App() {
         e.preventDefault();
         setShowSearch((v) => !v);
         setShowTerminal(false);
+      } else if (e.shiftKey && k === "p") {
+        e.preventDefault();
+        setPalette("commands");
+      } else if (k === "p") {
+        e.preventDefault();
+        setPalette("files");
       } else {
         // Extension command keybindings
         for (const cmd of extCommands) {
@@ -423,6 +424,27 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [saveFile, openFolder, closeTab, extCommands]);
+
+  // ---- Command palette registry ----
+  const paletteCommands: PaletteCommand[] = useMemo(() => [
+    { id: "file.save", label: "Salvar arquivo", hint: "Ctrl+S", run: () => saveFile() },
+    { id: "file.openFolder", label: "Abrir pasta", hint: "Ctrl+K Ctrl+O", run: () => openFolder() },
+    { id: "file.newTab", label: "Nova aba", run: () => { const t = newTab(); setTabs((ts) => [...ts, t]); setActiveId(t.id); } },
+    { id: "file.closeTab", label: "Fechar aba", hint: "Ctrl+W", run: () => closeTab(activeIdRef.current) },
+    { id: "view.terminal", label: "Alternar terminal", hint: "Ctrl+`", run: () => setShowTerminal((v) => !v) },
+    { id: "view.search", label: "Alternar busca", hint: "Ctrl+Shift+F", run: () => setShowSearch((v) => !v) },
+    { id: "view.git", label: "Alternar Git", hint: "Ctrl+Shift+G", run: () => setShowGit((v) => !v) },
+    { id: "view.github", label: "Alternar GitHub", hint: "Ctrl+Shift+H", run: () => setShowGitHub((v) => !v) },
+    { id: "view.ai", label: "Alternar IA", hint: "Ctrl+Shift+I", run: () => setShowAi((v) => !v) },
+    { id: "view.lsp", label: "Alternar LSP", hint: "Ctrl+Shift+L", run: () => setShowLspSetup((v) => !v) },
+    { id: "view.settings", label: "Configurações", run: () => setShowSettings((v) => !v) },
+    ...extCommands.map((c) => ({
+      id: c.id,
+      label: c.title || c.id,
+      hint: c.keybindings?.[0],
+      run: () => dispatchExtCommand(c, setExtPanelVis),
+    })),
+  ], [saveFile, openFolder, closeTab, extCommands]);
 
   return (
     <div className="app">
@@ -524,19 +546,31 @@ function App() {
             />
           )}
           {showSearch && rootPath && (
-            <SearchPanel rootPath={rootPath} onOpenFile={openFile} />
+            <SearchPanel
+              rootPath={rootPath}
+              onOpenFile={openFile}
+              onReplaced={() => setFileTreeVersion((v) => v + 1)}
+            />
           )}
         </div>
 
         {/* Main editor area */}
         <div className="main-content">
-          <div className="editor-area">
+          <div className="editor-area" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {activeTab && activeTab.path && rootPath && (
+              <Breadcrumbs
+                filePath={activeTab.path}
+                rootPath={rootPath}
+                cursorLine={cursorLine}
+                onSelect={(line) => setGotoLine(line + 1)}
+              />
+            )}
             {activeTab && (
+              <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
               <MonacoWrapper
-                key={activeTab.id}
                 language={activeTab.language}
                 value={activeTab.content}
-                path={activeTab.path || undefined}
+                path={activeTab.path ?? `untitled:${activeTab.id}`}
                 workspaceRoot={rootPath}
                 gotoLine={gotoLine}
                 onCursorPosition={(line, col) => {
@@ -557,12 +591,13 @@ function App() {
                   );
                 }}
               />
+              </div>
             )}
           </div>
 
           {/* Terminal */}
           {showTerminal && (
-            <TerminalPanel onClose={() => setShowTerminal(false)} />
+            <TerminalPanel workspaceRoot={rootPath} onClose={() => setShowTerminal(false)} />
           )}
         </div>
 
@@ -581,6 +616,17 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* Command palette */}
+      {palette && (
+        <CommandPalette
+          mode={palette}
+          rootPath={rootPath}
+          commands={paletteCommands}
+          onOpenFile={openFile}
+          onClose={() => setPalette(null)}
+        />
+      )}
 
       {/* Status bar */}
       <StatusBar

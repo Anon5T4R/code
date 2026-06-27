@@ -43,6 +43,10 @@ export const MonacoWrapper = memo(function MonacoWrapper({
   const versionRef = useRef(1);
   const lspLangRef = useRef<string | null>(null);
   const providersRegistered = useRef(false);
+  // Providers are registered once but the editor is no longer remounted per
+  // file, so they must read the *current* path from a ref, not a stale closure.
+  const pathRef = useRef(path);
+  pathRef.current = path;
   const [monacoTheme, setMonacoTheme] = useState(() => themeFromAttr());
 
   // Keep the editor theme in sync with the app theme (data-theme attribute)
@@ -100,7 +104,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
           ],
           provideCompletionItems: async (_model, position) => {
             const lang = lspLangRef.current;
-            const fp = path;
+            const fp = pathRef.current;
             if (!lang || !fp) return { suggestions: [] };
             try {
               const items = await getCompletion(
@@ -136,7 +140,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
       const hoverDisposable = monaco.languages.registerHoverProvider("*", {
         provideHover: async (_model, position) => {
           const lang = lspLangRef.current;
-          const fp = path;
+          const fp = pathRef.current;
           if (!lang || !fp) return null;
           try {
             const hover = await getHover(
@@ -168,7 +172,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
           signatureHelpRetriggerCharacters: [")"],
           provideSignatureHelp: async (_model, position) => {
             const lang = lspLangRef.current;
-            const fp = path;
+            const fp = pathRef.current;
             if (!lang || !fp) return null;
             try {
               const help = await getSignatureHelp(
@@ -204,7 +208,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
         monaco.languages.registerCodeActionProvider("*", {
           provideCodeActions: async (_model, range, _context) => {
             const lang = lspLangRef.current;
-            const fp = path;
+            const fp = pathRef.current;
             if (!lang || !fp) return { actions: [], dispose: () => {} };
             try {
               const actions = await getCodeAction(
@@ -235,7 +239,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
         monaco.languages.registerDefinitionProvider("*", {
           provideDefinition: async (_model, position) => {
             const lang = lspLangRef.current;
-            const fp = path;
+            const fp = pathRef.current;
             if (!lang || !fp) return null;
             try {
               const loc = await goToDefinition(
@@ -263,7 +267,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
         monaco.languages.registerReferenceProvider("*", {
           provideReferences: async (_model, position) => {
             const lang = lspLangRef.current;
-            const fp = path;
+            const fp = pathRef.current;
             if (!lang || !fp) return [];
             try {
               const refs = await findReferences(
@@ -289,7 +293,7 @@ export const MonacoWrapper = memo(function MonacoWrapper({
       const formatDisposable = monaco.languages.registerDocumentFormattingEditProvider("*", {
         provideDocumentFormattingEdits: async (_model) => {
           const lang = lspLangRef.current;
-          const fp = path;
+          const fp = pathRef.current;
           if (!lang || !fp) return [];
           try {
             const edits = await formatDocument(lang, fp);
@@ -408,10 +412,11 @@ export const MonacoWrapper = memo(function MonacoWrapper({
 
   return (
     <Editor
-      key={path}
       height="100%"
       language={language}
+      path={path}
       value={value}
+      keepCurrentModel
       onChange={handleChange}
       onMount={handleMount}
       theme={monacoTheme}

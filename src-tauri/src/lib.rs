@@ -143,6 +143,81 @@ struct SearchMatch {
     match_end: u32,
 }
 
+const BINARY_EXT: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "ico", "woff", "woff2", "ttf", "otf", "eot",
+    "pdf", "zip", "gz", "tar", "exe", "dll", "so", "dylib", "bin", "class",
+    "wasm", "lock",
+];
+
+fn is_binary_path(path: &Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    BINARY_EXT.contains(&ext)
+}
+
+/// Collect every match of `query` within `content` into `out`.
+fn search_in_content(
+    path: &str,
+    content: &str,
+    re: &Option<regex::Regex>,
+    query: &str,
+    case_sensitive: bool,
+    whole_word: bool,
+    out: &mut Vec<SearchMatch>,
+) {
+    let search_for_lower = if case_sensitive { String::new() } else { query.to_lowercase() };
+
+    for (line_idx, line) in content.lines().enumerate() {
+        let (search_in, search_for) = if case_sensitive {
+            (line.to_string(), query.to_string())
+        } else {
+            (line.to_lowercase(), search_for_lower.clone())
+        };
+
+        if let Some(re) = re {
+            for m in re.find_iter(&search_in) {
+                let col = m.start();
+                let end = m.end();
+                if whole_word {
+                    let before = col > 0 && search_in.as_bytes().get(col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                    let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                    if before || after { continue; }
+                }
+                out.push(SearchMatch {
+                    path: path.to_string(),
+                    line: (line_idx + 1) as u32,
+                    column: (col + 1) as u32,
+                    line_content: line.to_string(),
+                    match_start: col as u32,
+                    match_end: end as u32,
+                });
+            }
+        } else {
+            let mut start = 0;
+            while let Some(col) = search_in[start..].find(&search_for) {
+                let abs_col = start + col;
+                let end = abs_col + query.len();
+                if whole_word {
+                    let before = abs_col > 0 && search_in.as_bytes().get(abs_col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                    let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
+                    if before || after {
+                        start = abs_col + 1;
+                        continue;
+                    }
+                }
+                out.push(SearchMatch {
+                    path: path.to_string(),
+                    line: (line_idx + 1) as u32,
+                    column: (abs_col + 1) as u32,
+                    line_content: line.to_string(),
+                    match_start: abs_col as u32,
+                    match_end: end as u32,
+                });
+                start = abs_col + 1;
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn search_files(
     root: String,
@@ -151,11 +226,11 @@ fn search_files(
     use_regex: Option<bool>,
     whole_word: Option<bool>,
 ) -> Result<Vec<SearchMatch>, String> {
+    use ignore::WalkState;
+
     let case_sensitive = case_sensitive.unwrap_or(false);
     let use_regex = use_regex.unwrap_or(false);
     let whole_word = whole_word.unwrap_or(false);
-
-    let mut results = Vec::new();
 
     let re = if use_regex {
         Some(regex::Regex::new(&query).map_err(|e| format!("Regex inválida: {}", e))?)
@@ -163,13 +238,94 @@ fn search_files(
         None
     };
 
-    const BINARY_EXT: &[&str] = &[
-        "png", "jpg", "jpeg", "gif", "ico", "woff", "woff2", "ttf", "otf", "eot",
-        "pdf", "zip", "gz", "tar", "exe", "dll", "so", "dylib", "bin", "class",
-        "wasm", "lock",
-    ];
+    let results = std::sync::Mutex::new(Vec::<SearchMatch>::new());
 
-    let search_for_lower = if case_sensitive { String::new() } else { query.to_lowercase() };
+    ignore::WalkBuilder::new(&root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(false)
+        .build_parallel()
+        .run(|| {
+            Box::new(|entry| {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => return WalkState::Continue,
+                };
+                if !entry.file_type().map_or(false, |t| t.is_file()) {
+                    return WalkState::Continue;
+                }
+                let path = entry.path();
+                if is_binary_path(path) {
+                    return WalkState::Continue;
+                }
+                let content = match fs::read_to_string(path) {
+                    Ok(c) => c,
+                    Err(_) => return WalkState::Continue,
+                };
+                let mut local = Vec::new();
+                search_in_content(
+                    &path.to_string_lossy(),
+                    &content,
+                    &re,
+                    &query,
+                    case_sensitive,
+                    whole_word,
+                    &mut local,
+                );
+                if !local.is_empty() {
+                    results.lock().unwrap().extend(local);
+                }
+                WalkState::Continue
+            })
+        });
+
+    let mut results = results.into_inner().unwrap();
+    // Parallel walk yields nondeterministic order; sort for a stable UI.
+    results.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)).then(a.column.cmp(&b.column)));
+    Ok(results)
+}
+
+#[derive(Serialize)]
+struct ReplaceResult {
+    files_changed: u32,
+    replacements: u32,
+}
+
+/// Replace all occurrences of `query` with `replacement` across the workspace,
+/// honoring `.gitignore`. Returns counts of files changed and total replacements.
+#[tauri::command]
+fn replace_in_files(
+    root: String,
+    query: String,
+    replacement: String,
+    case_sensitive: Option<bool>,
+    use_regex: Option<bool>,
+    whole_word: Option<bool>,
+) -> Result<ReplaceResult, String> {
+    let case_sensitive = case_sensitive.unwrap_or(false);
+    let use_regex = use_regex.unwrap_or(false);
+    let whole_word = whole_word.unwrap_or(false);
+
+    if query.is_empty() {
+        return Err("A busca não pode estar vazia.".into());
+    }
+
+    // Build a single regex covering all modes so replacement is consistent.
+    let mut pattern = if use_regex { query.clone() } else { regex::escape(&query) };
+    if whole_word {
+        pattern = format!(r"\b(?:{})\b", pattern);
+    }
+    let re = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("Regex inválida: {}", e))?;
+
+    // In literal mode, escape `$` so it is not treated as a capture reference.
+    let repl = if use_regex { replacement.clone() } else { replacement.replace('$', "$$") };
+
+    let mut files_changed = 0u32;
+    let mut total = 0u32;
 
     for dir_entry in ignore::WalkBuilder::new(&root)
         .hidden(false)
@@ -178,80 +334,60 @@ fn search_files(
         .git_exclude(false)
         .build()
     {
-        let dir_entry = match dir_entry {
+        let entry = match dir_entry {
             Ok(e) => e,
             Err(_) => continue,
         };
-        if !dir_entry.file_type().map_or(false, |t| t.is_file()) {
+        if !entry.file_type().map_or(false, |t| t.is_file()) {
             continue;
         }
-        let path = dir_entry.path();
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if BINARY_EXT.contains(&ext) {
+        let path = entry.path();
+        if is_binary_path(path) {
             continue;
         }
         let content = match fs::read_to_string(path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-
-        let mut search_line = |line: &str, line_idx: usize| {
-            let (search_in, search_for) = if case_sensitive {
-                (line.to_string(), query.clone())
-            } else {
-                (line.to_lowercase(), search_for_lower.clone())
-            };
-
-            if let Some(re) = &re {
-                for m in re.find_iter(&search_in) {
-                    let col = m.start();
-                    let end = m.end();
-                    if whole_word {
-                        let before = col > 0 && search_in.as_bytes().get(col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
-                        let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
-                        if before || after { return; }
-                    }
-                    results.push(SearchMatch {
-                        path: path.to_string_lossy().to_string(),
-                        line: (line_idx + 1) as u32,
-                        column: (col + 1) as u32,
-                        line_content: line.to_string(),
-                        match_start: col as u32,
-                        match_end: end as u32,
-                    });
-                }
-            } else {
-                let mut start = 0;
-                while let Some(col) = search_in[start..].find(&search_for) {
-                    let abs_col = start + col;
-                    let end = abs_col + query.len();
-                    if whole_word {
-                        let before = abs_col > 0 && search_in.as_bytes().get(abs_col - 1).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
-                        let after = search_in.as_bytes().get(end).map_or(false, |c| c.is_ascii_alphanumeric() || *c == b'_');
-                        if before || after {
-                            start = abs_col + 1;
-                            continue;
-                        }
-                    }
-                    results.push(SearchMatch {
-                        path: path.to_string_lossy().to_string(),
-                        line: (line_idx + 1) as u32,
-                        column: (abs_col + 1) as u32,
-                        line_content: line.to_string(),
-                        match_start: abs_col as u32,
-                        match_end: end as u32,
-                    });
-                    start = abs_col + 1;
-                }
-            }
-        };
-
-        for (i, line) in content.lines().enumerate() {
-            search_line(line, i);
+        let count = re.find_iter(&content).count() as u32;
+        if count == 0 {
+            continue;
         }
+        let new_content = re.replace_all(&content, repl.as_str());
+        fs::write(path, new_content.as_ref())
+            .map_err(|e| format!("Falha ao escrever '{}': {}", path.display(), e))?;
+        files_changed += 1;
+        total += count;
     }
 
-    Ok(results)
+    Ok(ReplaceResult { files_changed, replacements: total })
+}
+
+/// List every file under `root`, honoring `.gitignore`. Used by the fuzzy file
+/// finder (command palette). Caps at `max` entries to stay responsive.
+#[tauri::command]
+fn list_workspace_files(root: String, max: Option<usize>) -> Result<Vec<String>, String> {
+    let max = max.unwrap_or(10000);
+    let mut files = Vec::new();
+    for dir_entry in ignore::WalkBuilder::new(&root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(false)
+        .build()
+    {
+        if files.len() >= max {
+            break;
+        }
+        let entry = match dir_entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().map_or(false, |t| t.is_file()) {
+            files.push(entry.path().to_string_lossy().to_string());
+        }
+    }
+    Ok(files)
 }
 
 // ---------------------------------------------------------------------------
@@ -392,10 +528,93 @@ fn git_add(repo_path: String, paths: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("Falha ao abrir repo: {}", e))?;
     let mut index = repo.index().map_err(|e| format!("Falha ao abrir index: {}", e))?;
     for p in &paths {
-        index.add_path(Path::new(p)).map_err(|e| format!("Falha ao adicionar '{}': {}", p, e))?;
+        let full = Path::new(&repo_path).join(p);
+        if full.exists() {
+            index.add_path(Path::new(p)).map_err(|e| format!("Falha ao adicionar '{}': {}", p, e))?;
+        } else {
+            // File was deleted in the working tree — stage the removal
+            index.remove_path(Path::new(p)).map_err(|e| format!("Falha ao remover '{}': {}", p, e))?;
+        }
     }
     index.write().map_err(|e| format!("Falha ao escrever index: {}", e))?;
     Ok(())
+}
+
+/// Unstage a path (reset index entry to HEAD), keeping working-tree changes.
+#[tauri::command]
+fn git_unstage(repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    let repo = git2::Repository::open(&repo_path)
+        .map_err(|e| format!("Falha ao abrir repo: {}", e))?;
+    match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
+        Some(head_commit) => {
+            let obj = head_commit.as_object();
+            let path_refs: Vec<&Path> = paths.iter().map(|p| Path::new(p)).collect();
+            repo.reset_default(Some(obj), path_refs)
+                .map_err(|e| format!("Falha ao remover do stage: {}", e))?;
+        }
+        None => {
+            // No commits yet: just drop the entries from the index
+            let mut index = repo.index().map_err(|e| format!("Falha ao abrir index: {}", e))?;
+            for p in &paths {
+                let _ = index.remove_path(Path::new(p));
+            }
+            index.write().map_err(|e| format!("Falha ao escrever index: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Discard working-tree changes for a path (checkout from HEAD/index).
+#[tauri::command]
+fn git_discard(repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    let repo = git2::Repository::open(&repo_path)
+        .map_err(|e| format!("Falha ao abrir repo: {}", e))?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    for p in &paths {
+        checkout.path(p);
+    }
+    repo.checkout_head(Some(&mut checkout))
+        .map_err(|e| format!("Falha ao descartar alterações: {}", e))?;
+    Ok(())
+}
+
+/// Return a unified diff for a single file. When `staged` is true, diffs the
+/// index against HEAD; otherwise diffs the working tree against the index.
+#[tauri::command]
+fn git_diff_file(repo_path: String, path: String, staged: bool) -> Result<String, String> {
+    let repo = git2::Repository::open(&repo_path)
+        .map_err(|e| format!("Falha ao abrir repo: {}", e))?;
+
+    let mut diff_opts = git2::DiffOptions::new();
+    diff_opts.pathspec(&path);
+    diff_opts.include_untracked(true);
+    diff_opts.recurse_untracked_dirs(true);
+
+    let diff = if staged {
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut diff_opts))
+            .map_err(|e| format!("Falha ao gerar diff: {}", e))?
+    } else {
+        repo.diff_index_to_workdir(None, Some(&mut diff_opts))
+            .map_err(|e| format!("Falha ao gerar diff: {}", e))?
+    };
+
+    let mut out = String::new();
+    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+        match line.origin() {
+            '+' | '-' | ' ' => out.push(line.origin()),
+            _ => {}
+        }
+        out.push_str(&String::from_utf8_lossy(line.content()));
+        true
+    })
+    .map_err(|e| format!("Falha ao formatar diff: {}", e))?;
+
+    if out.is_empty() {
+        out.push_str("(Sem alterações textuais — arquivo binário ou apenas modo/permissões)");
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -500,39 +719,57 @@ fn github_token_path(app: &tauri::AppHandle) -> PathBuf {
 
 const TOKEN_XOR_KEY: &[u8] = b"LocalCode2024!Secret@Key";
 
+/// Legacy XOR decode, kept only to migrate old `.github_token.bin` files.
 fn xor_cipher(data: &[u8]) -> Vec<u8> {
     data.iter().enumerate().map(|(i, b)| b ^ TOKEN_XOR_KEY[i % TOKEN_XOR_KEY.len()]).collect()
 }
 
+/// OS credential-store entry for the GitHub token (Windows Credential Manager /
+/// macOS Keychain / Linux Secret Service).
+fn keyring_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("LocalCode", "github_token")
+        .map_err(|e| format!("Erro ao acessar o cofre de credenciais: {}", e))
+}
+
 #[tauri::command]
 fn github_set_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
-    let path = github_token_path(&app);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let encrypted = xor_cipher(token.as_bytes());
-    fs::write(&path, encrypted).map_err(|e| format!("Erro salvando token: {}", e))?;
+    let entry = keyring_entry()?;
+    entry.set_password(&token).map_err(|e| format!("Erro salvando token: {}", e))?;
+    // Drop any legacy obfuscated file now that the real secret store has it.
+    let _ = fs::remove_file(github_token_path(&app));
     Ok(())
 }
 
 #[tauri::command]
 fn github_get_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let path = github_token_path(&app);
-    if !path.exists() {
-        return Ok(None);
+    let entry = keyring_entry()?;
+    match entry.get_password() {
+        Ok(token) => Ok(Some(token)),
+        Err(keyring::Error::NoEntry) => {
+            // Migrate a legacy XOR-obfuscated file into the keychain, then delete it.
+            let path = github_token_path(&app);
+            if path.exists() {
+                let encrypted = fs::read(&path).map_err(|e| format!("Erro lendo token: {}", e))?;
+                if let Ok(token) = String::from_utf8(xor_cipher(&encrypted)) {
+                    let _ = entry.set_password(&token);
+                    let _ = fs::remove_file(&path);
+                    return Ok(Some(token));
+                }
+            }
+            Ok(None)
+        }
+        Err(e) => Err(format!("Erro lendo token: {}", e)),
     }
-    let encrypted = fs::read(&path).map_err(|e| format!("Erro lendo token: {}", e))?;
-    let decrypted = xor_cipher(&encrypted);
-    let token = String::from_utf8(decrypted).map_err(|_| "Token corrompido".to_string())?;
-    Ok(Some(token))
 }
 
 #[tauri::command]
 fn github_remove_token(app: tauri::AppHandle) -> Result<(), String> {
-    let path = github_token_path(&app);
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("Erro removendo token: {}", e))?;
+    let entry = keyring_entry()?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(e) => return Err(format!("Erro removendo token: {}", e)),
     }
+    let _ = fs::remove_file(github_token_path(&app));
     Ok(())
 }
 
@@ -929,8 +1166,10 @@ async fn lsp_format_document(
 async fn terminal_spawn(
     manager: tauri::State<'_, Arc<TerminalManager>>,
     app: tauri::AppHandle,
+    cwd: Option<String>,
+    shell: Option<String>,
 ) -> Result<String, String> {
-    manager.spawn(app).await
+    manager.spawn(app, cwd, shell).await
 }
 
 #[tauri::command]
@@ -1112,6 +1351,11 @@ fn list_models(dir: String) -> Result<Vec<ModelInfo>, String> {
     Ok(out)
 }
 
+/// Return the first port in `[start, end]` that can be bound on localhost.
+fn find_free_port(start: u16, end: u16) -> Option<u16> {
+    (start..=end).find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok())
+}
+
 #[tauri::command]
 fn start_llm(
     app: tauri::AppHandle,
@@ -1131,7 +1375,9 @@ fn start_llm(
 
     let exe = resolve_llama_server(&app)?;
     let dir = exe.parent().ok_or("diretório do llama inválido")?.to_path_buf();
-    let port: u16 = 8090;
+    // Pick the first free port in the range whitelisted by the CSP (8090-8099).
+    let port = find_free_port(8090, 8099)
+        .ok_or("Nenhuma porta livre entre 8090 e 8099 para a IA")?;
 
     let mut cmd = Command::new(&exe);
     cmd.current_dir(&dir).args([
@@ -1377,6 +1623,9 @@ pub fn run() {
             rename_file,
             git_status,
             git_add,
+            git_unstage,
+            git_discard,
+            git_diff_file,
             git_commit,
             git_log,
             git_branches,
@@ -1406,6 +1655,8 @@ pub fn run() {
             lsp_document_symbols,
             lsp_format_document,
             search_files,
+            replace_in_files,
+            list_workspace_files,
             watch_workspace,
             unwatch_workspace,
             terminal_spawn,

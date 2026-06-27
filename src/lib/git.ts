@@ -9,6 +9,18 @@ export async function stageFiles(repoPath: string, paths: string[]): Promise<voi
   return invoke("git_add", { repoPath, paths });
 }
 
+export async function unstageFiles(repoPath: string, paths: string[]): Promise<void> {
+  return invoke("git_unstage", { repoPath, paths });
+}
+
+export async function discardFiles(repoPath: string, paths: string[]): Promise<void> {
+  return invoke("git_discard", { repoPath, paths });
+}
+
+export async function diffFile(repoPath: string, path: string, staged: boolean): Promise<string> {
+  return invoke<string>("git_diff_file", { repoPath, path, staged });
+}
+
 export async function commit(repoPath: string, message: string): Promise<void> {
   return invoke("git_commit", { repoPath, message });
 }

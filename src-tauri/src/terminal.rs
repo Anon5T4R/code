@@ -1,13 +1,20 @@
 use portable_pty::{CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use serde::Serialize;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
 
 #[derive(Clone, Serialize)]
 pub struct TerminalOutput {
+    pub session_id: String,
     pub data: String,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TerminalExit {
+    pub session_id: String,
 }
 
 pub struct TerminalSession {
@@ -29,18 +36,31 @@ impl TerminalManager {
         }
     }
 
-    pub async fn spawn(&self, app: AppHandle) -> Result<String, String> {
+    pub async fn spawn(
+        &self,
+        app: AppHandle,
+        cwd: Option<String>,
+        shell: Option<String>,
+    ) -> Result<String, String> {
         let pty_system = NativePtySystem::default();
 
-        let cmd = if cfg!(target_os = "windows") {
-            "cmd.exe"
-        } else {
-            "bash"
-        };
+        let cmd = shell.unwrap_or_else(|| {
+            if cfg!(target_os = "windows") {
+                "cmd.exe".to_string()
+            } else {
+                std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string())
+            }
+        });
 
         let mut builder = CommandBuilder::new(cmd);
-        if let Ok(cwd) = std::env::current_dir() {
-            builder.cwd(cwd);
+        // Open the terminal in the workspace folder when provided, falling back
+        // to the process working directory.
+        let dir = cwd
+            .filter(|c| Path::new(c).is_dir())
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::current_dir().ok());
+        if let Some(dir) = dir {
+            builder.cwd(dir);
         }
 
         let pair = pty_system
@@ -93,11 +113,14 @@ impl TerminalManager {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let _ = app_clone.emit("terminal-output", TerminalOutput { data });
+                        let _ = app_clone.emit(
+                            "terminal-output",
+                            TerminalOutput { session_id: sid.clone(), data },
+                        );
                     }
                 }
             }
-            let _ = app_clone.emit("terminal-exit", sid);
+            let _ = app_clone.emit("terminal-exit", TerminalExit { session_id: sid });
         });
 
         Ok(session_id)

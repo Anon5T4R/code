@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import type { StatusEntry, CommitEntry, BranchEntry } from "../types";
-import { getStatus, getLog, getBranches, stageFiles, commit, push, pull, checkout } from "../lib/git";
+import { getStatus, getLog, getBranches, stageFiles, unstageFiles, discardFiles, diffFile, commit, push, pull, checkout } from "../lib/git";
 
 interface GitPanelProps {
   repoPath: string | null;
@@ -14,6 +14,7 @@ export const GitPanel = memo(function GitPanel({ repoPath }: GitPanelProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState<"changes" | "history" | "branches">("changes");
+  const [diff, setDiff] = useState<{ path: string; staged: boolean; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!repoPath) return;
@@ -48,6 +49,51 @@ export const GitPanel = memo(function GitPanel({ repoPath }: GitPanelProps) {
       }
     },
     [repoPath, refresh]
+  );
+
+  const handleUnstage = useCallback(
+    async (paths: string[]) => {
+      if (!repoPath) return;
+      try {
+        await unstageFiles(repoPath, paths);
+        refresh();
+      } catch (e) {
+        setMessage(`Erro: ${e}`);
+      }
+    },
+    [repoPath, refresh]
+  );
+
+  const handleDiscard = useCallback(
+    async (path: string) => {
+      if (!repoPath) return;
+      const { ask } = await import("@tauri-apps/plugin-dialog");
+      const ok = await ask(`Descartar as alterações de "${path}"? Esta ação não pode ser desfeita.`, {
+        title: "Descartar alterações", kind: "warning",
+      });
+      if (!ok) return;
+      try {
+        await discardFiles(repoPath, [path]);
+        setMessage(`Alterações descartadas: ${path}`);
+        refresh();
+      } catch (e) {
+        setMessage(`Erro: ${e}`);
+      }
+    },
+    [repoPath, refresh]
+  );
+
+  const handleShowDiff = useCallback(
+    async (path: string, staged: boolean) => {
+      if (!repoPath) return;
+      try {
+        const text = await diffFile(repoPath, path, staged);
+        setDiff({ path, staged, text });
+      } catch (e) {
+        setMessage(`Erro: ${e}`);
+      }
+    },
+    [repoPath]
   );
 
   const handleCommit = useCallback(async () => {
@@ -112,7 +158,7 @@ export const GitPanel = memo(function GitPanel({ repoPath }: GitPanelProps) {
   const unstagedItems = status.filter((s) => !s.staged);
 
   return (
-    <div className="git-panel">
+    <div className="git-panel" style={{ position: "relative" }}>
       <div className="git-header">
         <span>Git</span>
         <div className="git-actions">
@@ -156,8 +202,29 @@ export const GitPanel = memo(function GitPanel({ repoPath }: GitPanelProps) {
               <div className="git-section-title">Staged ({stagedItems.length})</div>
               {stagedItems.map((s) => (
                 <div key={s.path} className="git-status-item staged">
-                  <span className={`git-status-badge ${s.status}`}>{s.status}</span>
-                  <span className="git-status-path">{s.path}</span>
+                  <span
+                    className={`git-status-badge ${s.status}`}
+                    onClick={() => handleShowDiff(s.path, true)}
+                    style={{ cursor: "pointer" }}
+                    title="Ver diff (staged)"
+                  >
+                    {s.status}
+                  </span>
+                  <span
+                    className="git-status-path"
+                    onClick={() => handleShowDiff(s.path, true)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {s.path}
+                  </span>
+                  <button
+                    className="git-action-btn"
+                    onClick={() => handleUnstage([s.path])}
+                    title="Remover do stage"
+                    style={{ marginLeft: "auto" }}
+                  >
+                    −
+                  </button>
                 </div>
               ))}
             </div>
@@ -167,13 +234,40 @@ export const GitPanel = memo(function GitPanel({ repoPath }: GitPanelProps) {
             <div className="git-section">
               <div className="git-section-title">Alterações ({unstagedItems.length})</div>
               {unstagedItems.map((s) => (
-                <div
-                  key={s.path}
-                  className="git-status-item"
-                  onClick={() => handleStage([s.path])}
-                >
-                  <span className={`git-status-badge ${s.status}`}>{s.status}</span>
-                  <span className="git-status-path">{s.path}</span>
+                <div key={s.path} className="git-status-item">
+                  <span
+                    className={`git-status-badge ${s.status}`}
+                    onClick={() => handleShowDiff(s.path, false)}
+                    style={{ cursor: "pointer" }}
+                    title="Ver diff"
+                  >
+                    {s.status}
+                  </span>
+                  <span
+                    className="git-status-path"
+                    onClick={() => handleShowDiff(s.path, false)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {s.path}
+                  </span>
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
+                    {s.status !== "untracked" && (
+                      <button
+                        className="git-action-btn"
+                        onClick={() => handleDiscard(s.path)}
+                        title="Descartar alterações"
+                      >
+                        ↺
+                      </button>
+                    )}
+                    <button
+                      className="git-action-btn"
+                      onClick={() => handleStage([s.path])}
+                      title="Adicionar ao stage"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -237,6 +331,50 @@ export const GitPanel = memo(function GitPanel({ repoPath }: GitPanelProps) {
       )}
 
       {message && <div className="git-message">{message}</div>}
+
+      {diff && (
+        <div
+          className="git-diff-overlay"
+          onClick={() => setDiff(null)}
+          style={{
+            position: "absolute", inset: 0, zIndex: 20,
+            background: "var(--bg-primary, #1e1e1e)", display: "flex", flexDirection: "column",
+          }}
+        >
+          <div
+            className="git-diff-header"
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid var(--border, #333)" }}
+          >
+            <span style={{ fontSize: 11, color: "var(--text-secondary, #999)" }}>
+              {diff.staged ? "STAGED" : "WORKDIR"}
+            </span>
+            <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {diff.path}
+            </span>
+            <button className="git-action-btn" style={{ marginLeft: "auto" }} onClick={() => setDiff(null)} title="Fechar">✕</button>
+          </div>
+          <pre
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              margin: 0, padding: 10, overflow: "auto", flex: 1,
+              fontFamily: "'Cascadia Code', 'Fira Code', Consolas, monospace", fontSize: 12, lineHeight: 1.5,
+            }}
+          >
+            {diff.text.split("\n").map((line, i) => {
+              let color = "var(--text-primary, #d4d4d4)";
+              if (line.startsWith("+")) color = "#4ec9b0";
+              else if (line.startsWith("-")) color = "#f14c4c";
+              else if (line.startsWith("@@")) color = "#569cd6";
+              return (
+                <div key={i} style={{ color, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+                  {line || " "}
+                </div>
+              );
+            })}
+          </pre>
+        </div>
+      )}
     </div>
   );
 });
