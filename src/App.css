@@ -30,6 +30,50 @@
   --font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
 }
 
+/* ---- Light theme ---- */
+[data-theme="light"] {
+  --bg-primary: #f3f3f3;
+  --bg-secondary: #e8e8e8;
+  --bg-tertiary: #dcdcdc;
+  --bg-hover: #e0e0e0;
+  --bg-active: #d0d0d0;
+  --bg-input: #ffffff;
+  --border: #cccccc;
+  --text-primary: #1e1e1e;
+  --text-secondary: #555555;
+  --text-muted: #888888;
+  --accent: #0065bd;
+  --accent-hover: #005aa8;
+  --danger: #c5201d;
+  --success: #1d7c6a;
+  --warning: #806900;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #c0c0c0;
+  --scrollbar-hover: #a8a8a8;
+}
+
+/* ---- High contrast theme ---- */
+[data-theme="high-contrast"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #111111;
+  --bg-hover: #1a1a1a;
+  --bg-active: #252525;
+  --bg-input: #0a0a0a;
+  --border: #6fc3df;
+  --text-primary: #ffffff;
+  --text-secondary: #d0d0d0;
+  --text-muted: #a0a0a0;
+  --accent: #6fc3df;
+  --accent-hover: #9fd8ef;
+  --danger: #f48771;
+  --success: #89d185;
+  --warning: #ffe600;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #6fc3df;
+  --scrollbar-hover: #9fd8ef;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -1246,6 +1290,16 @@ html, body, #root {
 .ai-config-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.ai-config-error {
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--danger) 15%, var(--bg-secondary));
+  color: var(--danger);
+  font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .ai-config {

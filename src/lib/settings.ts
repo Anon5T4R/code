@@ -7,6 +7,7 @@ export interface Settings {
   ctx: number;
   locale: "pt" | "en";
   githubClientId: string;
+  theme: "dark" | "light" | "high-contrast";
 }
 
 const DEFAULTS: Settings = {
@@ -16,6 +17,7 @@ const DEFAULTS: Settings = {
   ctx: 4096,
   locale: "pt",
   githubClientId: "",
+  theme: "dark",
 };
 
 const KEY = "localcode.settings";

@@ -1178,73 +1178,44 @@ fn check_command(cmd: &str) -> bool {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         #[cfg(windows)]
-        let ok = Command::new("where").arg(&cmd).output().is_ok();
+        let ok = Command::new("where").arg(&cmd).output().map(|o| o.status.success()).unwrap_or(false);
         #[cfg(not(windows))]
-        let ok = Command::new("which").arg(&cmd).output().is_ok();
+        let ok = Command::new("which").arg(&cmd).output().map(|o| o.status.success()).unwrap_or(false);
         let _ = tx.send(ok);
     });
     rx.recv_timeout(Duration::from_millis(800)).unwrap_or(false)
 }
 
 #[tauri::command]
-fn check_lsp_servers(app: tauri::AppHandle) -> Vec<LspServerStatus> {
+async fn check_lsp_servers(app: tauri::AppHandle) -> Vec<LspServerStatus> {
     let rd = resolve_lsp_resource_dir(&app);
-    vec![
-        LspServerStatus {
-            name: "typescript-language-server".into(),
-            installed: lsp::check_bundled_lsp(&rd, "typescript-language-server")
-                || check_command("typescript-language-server"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "rust-analyzer".into(),
-            installed: lsp::check_bundled_lsp(&rd, "rust-analyzer")
-                || check_command("rust-analyzer"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "pylsp".into(),
-            installed: lsp::check_bundled_lsp(&rd, "pylsp")
-                || check_command("pylsp"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "gopls".into(),
-            installed: lsp::check_bundled_lsp(&rd, "gopls")
-                || check_command("gopls"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "yaml-language-server".into(),
-            installed: lsp::check_bundled_lsp(&rd, "yaml-language-server")
-                || check_command("yaml-language-server"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "vscode-html-language-server".into(),
-            installed: lsp::check_bundled_lsp(&rd, "vscode-html-language-server")
-                || check_command("vscode-html-language-server"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "vscode-css-language-server".into(),
-            installed: lsp::check_bundled_lsp(&rd, "vscode-css-language-server")
-                || check_command("vscode-css-language-server"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "vscode-json-language-server".into(),
-            installed: lsp::check_bundled_lsp(&rd, "vscode-json-language-server")
-                || check_command("vscode-json-language-server"),
-            install_hint: "Embutido (offline)".into(),
-        },
-        LspServerStatus {
-            name: "dart".into(),
-            installed: lsp::check_bundled_lsp(&rd, "dart")
-                || check_command("dart"),
-            install_hint: "Embutido (offline)".into(),
-        },
-    ]
+    let servers: Vec<(&str, &str)> = vec![
+        ("typescript-language-server", "typescript-language-server"),
+        ("rust-analyzer", "rust-analyzer"),
+        ("pylsp", "pylsp"),
+        ("gopls", "gopls"),
+        ("yaml-language-server", "yaml-language-server"),
+        ("vscode-html-language-server", "vscode-html-language-server"),
+        ("vscode-css-language-server", "vscode-css-language-server"),
+        ("vscode-json-language-server", "vscode-json-language-server"),
+        ("dart", "dart"),
+    ];
+
+    let handles: Vec<_> = servers.into_iter().map(|(name, cmd)| {
+        let rd = rd.clone();
+        let name = name.to_owned();
+        let cmd = cmd.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let installed = lsp::check_bundled_lsp(&rd, &name) || check_command(&cmd);
+            LspServerStatus { name, installed, install_hint: "Embutido (offline)".into() }
+        })
+    }).collect();
+
+    let mut results = Vec::new();
+    for h in handles {
+        if let Ok(s) = h.await { results.push(s); }
+    }
+    results
 }
 
 /// Execute an install command — only used now for non-embedded LSPs (pylsp).

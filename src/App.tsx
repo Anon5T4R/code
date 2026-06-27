@@ -21,7 +21,12 @@ import type { Tab } from "./types";
 import { basename } from "./lib/path";
 import { ExtensionManager } from "./lib/extension";
 import type { ExtensionPanel, ExtensionCommand } from "./lib/extension";
+import { loadSettings } from "./lib/settings";
 import "./App.css";
+
+// Apply saved theme immediately on load
+const _savedTheme = loadSettings().theme;
+if (_savedTheme) document.documentElement.setAttribute("data-theme", _savedTheme);
 
 const TAB_ID = () => crypto.randomUUID();
 

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
-import { loadSettings, saveSettings, type Settings } from "../lib/settings";
+import { loadSettings, saveSettings } from "../lib/settings";
+import type { Settings } from "../lib/settings";
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -50,6 +51,21 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
         <div className="git-section">
           <div className="git-section-title">Editor</div>
+
+          <label className="settings-label">Tema</label>
+          <select
+            className="github-input"
+            value={settings.theme}
+            onChange={(e) => {
+              const theme = e.target.value as Settings["theme"];
+              update({ theme });
+              document.documentElement.setAttribute("data-theme", theme);
+            }}
+          >
+            <option value="dark">Escuro (padrão)</option>
+            <option value="light">Claro</option>
+            <option value="high-contrast">Alto contraste</option>
+          </select>
 
           <label className="settings-label">Idioma</label>
           <select

@@ -22,6 +22,7 @@ export const AiPanel = memo(function AiPanel({ workspaceRoot, onRefresh }: AiPan
   const [status, setStatus] = useState<{ running: boolean; port: number; model: string }>({ running: false, port: 0, model: "" });
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelDir, setModelDir] = useState(loadSettings().modelsDir);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(true);
   const [agentMode, setAgentMode] = useState(true);
   const [pendingTool, setPendingTool] = useState<{ tool: string; args: Record<string, any> } | null>(null);
@@ -47,6 +48,7 @@ export const AiPanel = memo(function AiPanel({ workspaceRoot, onRefresh }: AiPan
   }, [refreshStatus]);
 
   const handleBrowseModels = useCallback(async () => {
+    setConfigError(null);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({ directory: true, multiple: false, title: "Selecionar pasta de modelos GGUF" });
@@ -54,14 +56,16 @@ export const AiPanel = memo(function AiPanel({ workspaceRoot, onRefresh }: AiPan
         setModelDir(selected);
         const list = await listModels(selected);
         setModels(list);
+        if (list.length === 0) setConfigError("Nenhum arquivo .gguf encontrado nesta pasta.");
       }
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: "user", content: `Erro: ${e}` }]);
+      setConfigError(`Erro ao listar modelos: ${e}`);
     }
   }, []);
 
   const handleStartLlm = useCallback(async (modelPath: string) => {
     setLoading(true);
+    setConfigError(null);
     try {
       const settings = loadSettings();
       const port = await startLlm(modelPath, settings.ngl, settings.ctx);
@@ -72,7 +76,7 @@ export const AiPanel = memo(function AiPanel({ workspaceRoot, onRefresh }: AiPan
       setToolHistory([]);
       await refreshStatus();
     } catch (e: any) {
-      setMessages((prev) => [...prev, { role: "user", content: `Erro ao iniciar IA: ${e}` }]);
+      setConfigError(`${e}`);
     }
     setLoading(false);
   }, [refreshStatus]);
@@ -292,6 +296,10 @@ export const AiPanel = memo(function AiPanel({ workspaceRoot, onRefresh }: AiPan
                 </div>
               ))}
             </div>
+          )}
+
+          {configError && (
+            <div className="ai-config-error">⚠️ {configError}</div>
           )}
 
           {loading && (
