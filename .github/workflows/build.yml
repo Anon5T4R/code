@@ -186,20 +186,20 @@ jobs:
           mkdir -p src-tauri/binaries/llama llama-extract
           tar -xzf llama.tar.gz -C llama-extract
           # Copy everything preserving symlinks (cp -a) so the SONAME chains
-          # (libllama-common.so.0 -> libllama-common.so.0.0.x) survive — linuxdeploy
-          # resolves by soname and needs those symlinks present.
+          # (libllama-common.so.0 -> libllama-common.so.0.0.x) survive.
           cp -a llama-extract/*/. src-tauri/binaries/llama/
           chmod +x src-tauri/binaries/llama/llama-server
+          # linuxdeploy resolves deps via the system linker cache, not the resource
+          # dir or LD_LIBRARY_PATH — register llama's private libs with ldconfig so
+          # libllama-common.so.0 etc. are found at bundle time.
+          sudo cp -a llama-extract/*/lib*.so* /usr/local/lib/
+          sudo ldconfig
 
       - name: Build AppImage
-        # LD_LIBRARY_PATH lets linuxdeploy resolve the bundled llama-server's
-        # private libs (libllama-common.so.0 etc.), which live in the resource
-        # dir that linuxdeploy doesn't search by default.
         run: npm run tauri build -- --verbose --bundles appimage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
           NO_STRIP: "true"
-          LD_LIBRARY_PATH: ${{ github.workspace }}/src-tauri/binaries/llama
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
