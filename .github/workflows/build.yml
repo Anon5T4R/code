@@ -182,9 +182,9 @@ jobs:
 
       - name: Download llama-server (Linux)
         run: |
-          wget -qO llama.zip https://github.com/ggml-org/llama.cpp/releases/download/b9802/llama-b9802-bin-ubuntu-x64.zip
+          wget -qO llama.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b9802/llama-b9802-bin-ubuntu-x64.tar.gz
           mkdir -p src-tauri/binaries/llama llama-extract
-          unzip -q llama.zip -d llama-extract
+          tar -xzf llama.tar.gz -C llama-extract
           # Flatten llama-server + its shared libraries into binaries/llama
           find llama-extract -type f \( -name 'llama-server' -o -name '*.so' -o -name '*.so.*' \) -exec cp {} src-tauri/binaries/llama/ \;
           chmod +x src-tauri/binaries/llama/llama-server
