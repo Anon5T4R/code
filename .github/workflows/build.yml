@@ -185,8 +185,10 @@ jobs:
           wget -qO llama.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b9802/llama-b9802-bin-ubuntu-x64.tar.gz
           mkdir -p src-tauri/binaries/llama llama-extract
           tar -xzf llama.tar.gz -C llama-extract
-          # Flatten llama-server + its shared libraries into binaries/llama
-          find llama-extract -type f \( -name 'llama-server' -o -name '*.so' -o -name '*.so.*' \) -exec cp {} src-tauri/binaries/llama/ \;
+          # Copy everything preserving symlinks (cp -a) so the SONAME chains
+          # (libllama-common.so.0 -> libllama-common.so.0.0.x) survive — linuxdeploy
+          # resolves by soname and needs those symlinks present.
+          cp -a llama-extract/*/. src-tauri/binaries/llama/
           chmod +x src-tauri/binaries/llama/llama-server
 
       - name: Build AppImage
